@@ -1,6 +1,6 @@
 {
-  "name": "@interop/isomorphic-lib-template",
-  "description": "A Typescript/Javascript isomorphic library template, for use in the browser, Node.js, and React Native.",
+  "name": "@interop/wallet-backup",
+  "description": "Backup bundle codec and content-migration walk for portable wallets",
   "version": "0.0.1",
   "type": "module",
   "scripts": {
@@ -36,9 +36,18 @@
   "types": "dist/index.d.ts",
   "sideEffects": false,
   "dependencies": {
+    "@interop/social-core": "^0.8.1",
+    "@interop/space-archive": "^0.1.0",
+    "@interop/vh-resource-log": "^0.5.2",
+    "@scure/base": "^2.4.0",
+    "events": "^3.3.0",
+    "tar-stream": "^3.2.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@interop/wallet-core": "link:../wallet-core",
+    "@interop/was-client": "^0.70.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",
@@ -52,12 +61,19 @@
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
   },
+  "peerDependencies": {
+    "@interop/wallet-core": ">=0.79.0 <1.0.0",
+    "@interop/was-client": ">=0.70.0 <1.0.0"
+  },
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
   "keywords": [
-    "isomorphic"
+    "wallet",
+    "backup",
+    "bundle",
+    "migration"
   ],
   "packageManager": "pnpm@11.5.0",
   "engines": {
@@ -70,8 +86,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/interop-alliance/isomorphic-lib-template.git"
+    "url": "git+https://github.com/interop-alliance/wallet-backup.git"
   },
-  "homepage": "https://github.com/interop-alliance/isomorphic-lib-template",
-  "bugs": "https://github.com/interop-alliance/isomorphic-lib-template/issues"
+  "homepage": "https://github.com/interop-alliance/wallet-backup",
+  "bugs": "https://github.com/interop-alliance/wallet-backup/issues"
 }
