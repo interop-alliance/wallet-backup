@@ -15,10 +15,8 @@
  * Generations arrive oldest first and are reversed here, because the newest is
  * the one most rows open under and every fallback costs a failed unwrap.
  */
-import {
-  unwrapUserKeyGenerations,
-  userKeyVaultKeys
-} from '@interop/wallet-core/keys'
+import { userKeyVaultKeys } from '@interop/wallet-core/keys/userKey'
+import { unwrapUserKeyGenerations } from '@interop/wallet-core/keys/userKeyGenerations'
 import { createEdvDocCipher } from '@interop/was-client/edv/core'
 import type { CollectionEncryption } from '@interop/was-client'
 import { BundleRecipientMissingError } from '../errors.js'

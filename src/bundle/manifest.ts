@@ -200,8 +200,7 @@ export function spaceArchiveRoles(
 ): Map<string, string> {
   const roles = new Map<string, string>()
   const spaces = manifest.contents[SPACES_DIRECTORY] as
-    | { contents?: unknown }
-    | undefined
+    { contents?: unknown } | undefined
   const contents = spaces?.contents
   if (!Array.isArray(contents)) {
     return roles

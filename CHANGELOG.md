@@ -4,6 +4,13 @@
 
 ### Added
 
+- `pnpm run test:dist` builds the package and runs
+  `test/probe/transportClosure.mjs`, which imports `dist/index.js` under a Node
+  resolve hook and fails if any resolved module is a was-client transport
+  module, was-client's `./edv` or root barrel, or wallet-core's `./space`
+  barrel, `resourceLog/` or `clientAnnex/`.
+- Listed as a party to the encrypted-collections contract, in that spec's
+  AGENTS.md table and in ARCHITECTURE.md here.
 - Initial commit.
 - Renamed from `@interop/isomorphic-lib-template` to `@interop/wallet-backup`.
 - Per-Space archive codec (`src/archive/`): `packSpaceArchive` and its entry
@@ -66,7 +73,12 @@
   from this package. This is a breaking change: import them from
   `@interop/space-archive` instead. `ByteSource` stays re-exported here as a
   type only, since `readBundle` and `migrateBundle` take one as a parameter.
-- `@interop/wallet-core` (`>=0.79.0 <1.0.0`) and `@interop/was-client`
+- `@interop/wallet-core` (`>=0.79.1 <1.0.0`) and `@interop/was-client`
   (`>=0.70.0 <1.0.0`) are peer dependencies. The host wallet supplies both.
+- Every wallet-core import is a leaf entry (`keyring/kdf`,
+  `keyring/recordEnvelope`, `keys/userKey`, `keys/userKeyGenerations`,
+  `unlock/standingClient`, `recovery/recoveryCode`, `space/collections`) rather
+  than a module barrel, so importing this package evaluates no did:webvh, zcap
+  or WAS transport module.
 - `BundleInvalidError` is now re-exported from `@interop/space-archive`, which
   defines it. Every throw site in this package still raises the same class.

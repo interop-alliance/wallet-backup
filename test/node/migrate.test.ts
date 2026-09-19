@@ -12,12 +12,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   generateRecoveryCode,
   recoveryClientFromCode
-} from '@interop/wallet-core/recovery'
+} from '@interop/wallet-core/recovery/recoveryCode'
 import {
   PRIVATE_CREDENTIALS_COLLECTION,
   WALLET_ACTIVITY_COLLECTION,
   APP_CONNECTIONS_COLLECTION
-} from '@interop/wallet-core/space'
+} from '@interop/wallet-core/space/collections'
 import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION

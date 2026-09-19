@@ -19,16 +19,15 @@
  * the keyring cipher context exactly as wallet-core binds it.
  */
 import { base64urlnopad } from '@scure/base'
+import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
+import type { UnlockKdf } from '@interop/wallet-core/keyring/kdf'
 import {
-  deriveUnlockSeed,
   mintRecordEncryption,
   recordCipher,
   recordEnvelopeId,
-  recordSealCipher,
-  KEYRING_KDF
-} from '@interop/wallet-core/keyring'
-import type { UnlockKdf } from '@interop/wallet-core/keyring'
-import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock'
+  recordSealCipher
+} from '@interop/wallet-core/keyring/recordEnvelope'
+import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
 import type { CollectionEncryption } from '@interop/was-client'
 import { BundleInvalidError } from '../errors.js'
 

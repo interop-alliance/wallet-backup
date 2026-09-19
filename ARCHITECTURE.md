@@ -83,13 +83,24 @@ The dependency direction inside this package is one way: `migrate/` reads
    constants (`BUNDLE_ROLE`, the six archive manifest URLs) and are copied,
    never rewritten -- a reader finds the account Space archive by matching an
    anchor, and nothing else marks which tar is which.
-7. **The migration walk issues no request.** It builds its ciphers without a
-   `spaceId`, so was-client constructs no transport, and it reads every
-   descriptor out of the archive. The ciphers and epoch primitives are imported
-   from `@interop/was-client/edv/core`, the entry that does not evaluate
-   was-client's transport modules. A bundle migrates with the old account gone
-   and the old server unreachable. The node suites install a `fetch` that
-   throws, so a walk that reached the network would fail rather than pass.
+7. **The migration walk issues no request, and the package evaluates no
+   transport module.** The walk builds its ciphers without a `spaceId`, so
+   was-client constructs no transport, and it reads every descriptor out of the
+   archive. A bundle migrates with the old account gone and the old server
+   unreachable. The node suites install a `fetch` that throws, so a walk that
+   reached the network would fail rather than pass. The import graph keeps the
+   same promise: the ciphers and epoch primitives come from
+   `@interop/was-client/edv/core`, and every wallet-core derivation and
+   collection name comes from a leaf entry (`keyring/kdf`,
+   `keyring/recordEnvelope`, `keys/userKey`, `keys/userKeyGenerations`,
+   `unlock/standingClient`, `recovery/recoveryCode`, `space/collections`) rather
+   than a module barrel. `test/probe/transportClosure.mjs` imports the built
+   package under a Node resolve hook and fails if any resolved module is a
+   was-client module that talks to a server, was-client's `./edv` or root
+   barrel, or wallet-core's `./space` barrel, `resourceLog/` or `clientAnnex/`.
+   It runs as `pnpm run test:dist`. One reach is allowed by design: the client
+   derivations load `@interop/was-client/identity`, which brings the zcap and
+   HTTP signing packages, wallet-core's own recorded allowance for its leaves.
 8. **Key material does not outlive the walk, as far as it can be scrubbed.**
    `migrateBundle` zeroes every recovered generation's raw `secret` and every
    derived unlock seed in a `finally`, so an abort and a refusal drop them as an
@@ -121,6 +132,15 @@ The dependency direction inside this package is one way: `migrate/` reads
   dependencies, so the host wallet's one copy serves this package too. A second
   copy could carry different collection names or KDF parameters than the wallet
   it migrates into, and nothing would fail.
+- The encrypted-collections profile (the `CollectionEncryption` descriptor, the
+  epoch roster, the envelope) belongs to the encrypted-collections spec and its
+  reference implementation in `@interop/was-client`. This package is a listed
+  party to that contract, as a consumer: `migrate/descriptorLog.ts` reads a
+  descriptor out of an archived resource log, `migrate/generations.ts` unwraps
+  its epoch secrets and opens rows through `createEdvDocCipher`, and
+  `bundle/recoveryCode.ts` seals the packed code under a one-epoch descriptor of
+  the same construction. A normative change there is a walk of that spec's
+  parties table and reaches this repo through it.
 - Encoding primitives (base64url and friends) come from `@scure/base`.
 - HTTP belongs to the host. Nothing here fetches: a bundle is bytes in, bytes
   out.
@@ -174,11 +194,4 @@ The dependency direction inside this package is one way: `migrate/` reads
 
 ## Current State labels
 
-- Transitional: the `@interop/wallet-core` devDependency is a pnpm
-  `link:../wallet-core`, because `recordEnvelopeId` is in the local checkout and
-  not in the published 0.78.1. The peer range already names 0.79.0, the first
-  version to carry it. Drop the link for a caret range once wallet-core
-  publishes.
-- Transitional: `@interop/space-archive` is consumed through a pnpm
-  `link:../space-archive`, because it has not published to npm yet. Drop the
-  link for a caret range once it publishes.
+None. Every `@interop/*` dependency is consumed from the npm registry.

@@ -18,7 +18,7 @@
 import {
   PRIVATE_CREDENTIALS_COLLECTION,
   WALLET_ACTIVITY_COLLECTION
-} from '@interop/wallet-core/space'
+} from '@interop/wallet-core/space/collections'
 import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION

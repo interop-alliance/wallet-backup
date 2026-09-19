@@ -13,9 +13,9 @@
  * chooses between them and hands back the key-agreement key the roster lookup
  * matches on, plus the intermediate seed so the walk can wipe it when it ends.
  */
-import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock'
-import { recoveryClientFromCode } from '@interop/wallet-core/recovery'
+import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
+import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
+import { recoveryClientFromCode } from '@interop/wallet-core/recovery/recoveryCode'
 import { BundleInvalidError } from '../errors.js'
 import { unpackRecoveryCode } from '../bundle/recoveryCode.js'
 import { RECOVERY_CODE_FILE } from '../bundle/manifest.js'

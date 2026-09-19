@@ -13,12 +13,12 @@
  * no key material back.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock'
+import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
+import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
 import {
   generateRecoveryCode,
   recoveryClientFromCode
-} from '@interop/wallet-core/recovery'
+} from '@interop/wallet-core/recovery/recoveryCode'
 import { CONTACTS_COLLECTION } from '@interop/social-core'
 import {
   migrateBundle,
@@ -52,24 +52,29 @@ const recovered: Array<{ id: string; secret: Uint8Array }> = []
  */
 const seeds: Uint8Array[] = []
 
-vi.mock('@interop/wallet-core/keys', async importOriginal => {
-  const original =
-    await importOriginal<typeof import('@interop/wallet-core/keys')>()
-  return {
-    ...original,
-    async unwrapUserKeyGenerations(
-      options: Parameters<typeof original.unwrapUserKeyGenerations>[0]
-    ) {
-      const generations = await original.unwrapUserKeyGenerations(options)
-      recovered.push(...generations)
-      return generations
+vi.mock(
+  '@interop/wallet-core/keys/userKeyGenerations',
+  async importOriginal => {
+    const original =
+      await importOriginal<
+        typeof import('@interop/wallet-core/keys/userKeyGenerations')
+      >()
+    return {
+      ...original,
+      async unwrapUserKeyGenerations(
+        options: Parameters<typeof original.unwrapUserKeyGenerations>[0]
+      ) {
+        const generations = await original.unwrapUserKeyGenerations(options)
+        recovered.push(...generations)
+        return generations
+      }
     }
   }
-})
+)
 
-vi.mock('@interop/wallet-core/keyring', async importOriginal => {
+vi.mock('@interop/wallet-core/keyring/kdf', async importOriginal => {
   const original =
-    await importOriginal<typeof import('@interop/wallet-core/keyring')>()
+    await importOriginal<typeof import('@interop/wallet-core/keyring/kdf')>()
   return {
     ...original,
     async deriveUnlockSeed(

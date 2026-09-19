@@ -14,7 +14,7 @@
 import {
   KEY_MAP_COLLECTION,
   USER_KEY_ROSTER_LOG_RESOURCE
-} from '@interop/wallet-core/space'
+} from '@interop/wallet-core/space/collections'
 import {
   classifyCollectionFile,
   parseArchivePath,

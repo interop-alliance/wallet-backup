@@ -23,11 +23,12 @@ import {
 } from '@interop/was-client/edv/core'
 import type { RecipientPublicKey } from '@interop/was-client/edv/core'
 import type { CollectionEncryption } from '@interop/was-client'
-import { mintUserKey, userKeyAsRecipient } from '@interop/wallet-core/keys'
+import { mintUserKey } from '@interop/wallet-core/keys/userKey'
+import { userKeyAsRecipient } from '@interop/wallet-core/keys/userKeyGenerations'
 import {
   KEY_MAP_COLLECTION,
   USER_KEY_ROSTER_LOG_RESOURCE
-} from '@interop/wallet-core/space'
+} from '@interop/wallet-core/space/collections'
 import {
   chunkDirName,
   collectBytes,
