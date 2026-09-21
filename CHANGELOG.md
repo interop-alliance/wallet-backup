@@ -1,5 +1,11 @@
 # @interop/wallet-backup Changelog
 
+## 0.2.1 - TBD
+
+### Changed
+
+- Update to latest space-archive.
+
 ## 0.2.0 - 2026-09-20
 
 ### Added

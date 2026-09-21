@@ -12,8 +12,8 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@interop/space-archive':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       '@interop/vh-resource-log':
         specifier: ^0.5.2
         version: 0.5.2
@@ -272,8 +272,8 @@ packages:
     resolution: {integrity: sha512-WxnkYKmg4y0eSMlXVUPlzHkZlWSRVlyjTBRQkrEtcmPY5A7gw/K/ANB9S8YPtOVWreV+RAATEvjF56CJGDU3Yg==}
     engines: {node: '>=24.0'}
 
-  '@interop/space-archive@0.1.0':
-    resolution: {integrity: sha512-hdJUEqwXAEHMV0QAlzWWilvsGjltVPUyOEIHosGz953TmW5XWAA1tdkMjqaLfGKBx4GFoh7whgPiYjCmbjTmcA==}
+  '@interop/space-archive@0.2.0':
+    resolution: {integrity: sha512-gseOk/5EHxYmjsihLmZgeZJwv0yxp66cg+3bPoDv2RJ9vD9YazpwDEFF/eUByJ3iaO44ps2XaHbudzUOYCs8vw==}
     engines: {node: '>=24.0'}
 
   '@interop/storage-core@0.18.0':
@@ -1552,7 +1552,7 @@ snapshots:
 
   '@interop/social-core@0.8.1': {}
 
-  '@interop/space-archive@0.1.0':
+  '@interop/space-archive@0.2.0':
     dependencies:
       events: 3.3.0
       mime-types: 3.0.2
