@@ -22,6 +22,7 @@ src/errors.ts             The package's error classes, told apart by `name`
 
 src/bundle/index.ts       The outer bundle codec's door
 src/bundle/manifest.ts    The bundle manifest, its `spec`, and the role anchors
+src/bundle/exportBundle.ts The export ceremony: code, Space list, archives, pack
 src/bundle/writeBundle.ts Packs manifest + packed code + one archive per Space
 src/bundle/readBundle.ts  Opens a bundle; `accountSpaceArchive` finds the account tar
 src/bundle/recoveryCode.ts The packed recovery code, plain or sealed
@@ -112,12 +113,22 @@ The dependency direction inside this package is one way: `migrate/` reads
    half as an immutable `privateKeyMultibase` string, which no code can scrub.
    Those are dropped when the walk ends and reclaimed by garbage collection, on
    the collector's schedule rather than the walk's.
-9. **The walk refuses early or counts.** `BundleInvalidError`,
-   `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
-   raised before any row reaches a sink. Past that point every failure is a
-   number in the report -- an unreadable collection log, a row no generation
-   opens, a write that did not land -- except a sink throw named
-   `QuotaExceededError`, which ends the walk and is named in `stoppedAt`.
+9. **An export mints the recovery code before it reads the Space list.**
+   `exportBundle` runs the ceremony in one order: issue the code through the
+   host's own issuance port, then list the Spaces, then export each in the order
+   listed, then pack. The issuance writes the code's own unlock Space, so
+   reading the list second is what makes the bundle self-sufficient -- the code
+   a reader unpacks opens a Space that bundle carries. A list naming no account
+   Space refuses before any export runs, and a Space export that fails fails the
+   whole ceremony, since a bundle silently missing one sibling reads as complete
+   and is not. The code string is held for the one `packRecoveryCode` call and
+   never returned.
+10. **The walk refuses early or counts.** `BundleInvalidError`,
+    `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
+    raised before any row reaches a sink. Past that point every failure is a
+    number in the report -- an unreadable collection log, a row no generation
+    opens, a write that did not land -- except a sink throw named
+    `QuotaExceededError`, which ends the walk and is named in `stoppedAt`.
 
 ## Ownership heuristics
 
@@ -160,6 +171,10 @@ The dependency direction inside this package is one way: `migrate/` reads
   Space, the client annex Space, or the unlock Space. Carried as the `url`
   anchor of the archive's manifest `contents` entry, named by `BUNDLE_ROLE`.
   Avoid: space type, kind, category.
+- **Export ceremony** -- one run of `exportBundle`: a recovery code minted, the
+  account's Spaces listed and exported one at a time, and a bundle packed. The
+  package owns the order; the host owns the effects, handed in as ports. Lives
+  in `src/bundle/exportBundle.ts`. Avoid: backup run, export flow, dump.
 - **Packed recovery code** -- the bundle's `recovery-code.json`: the account's
   recovery code either in the clear or sealed to an export passphrase. Lives in
   `src/bundle/recoveryCode.ts`. Avoid: sealed code, wrapped code, code envelope.

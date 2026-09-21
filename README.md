@@ -116,6 +116,36 @@ The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 passphrase. A secret that is a recipient of nothing in the archived user key
 roster is refused with `BundleRecipientMissingError` before any row is written.
 
+### Exporting a bundle
+
+`exportBundle` runs the export ceremony: it mints the account's recovery code
+through the wallet's own issuance, lists the Spaces the account names, exports
+each one through the server's per-Space primitive, and packs the bundle. The
+code is minted first, so the Space list already names the unlock Space that code
+writes and the bundle can be read back on its own. Every effect is a port you
+supply; the package issues no request and never hands the code string back.
+
+```js
+import { exportBundle } from '@interop/wallet-backup'
+
+const pack = await exportBundle({
+  meta: { created, createdBy: { controller, client } },
+  issueRecoveryCode: () => wallet.issueRecoveryCode(),
+  listSpaces: () => wallet.listSpaces(), // [{ spaceId, role }], roles from BUNDLE_ROLE
+  exportSpace: ({ spaceId }) => server.exportSpace(spaceId),
+  exportPassphrase, // optional; seals the packed code when given
+  onProgress({ stage, spaceId }) {
+    ui.show(spaceId ? `${stage}: ${spaceId}` : stage)
+  },
+  signal: controller.signal
+})
+// pipe `pack` wherever the file goes
+```
+
+A Space export that fails fails the whole ceremony: the rejection names the
+Space and carries your error as `cause`. A Space list naming no account Space is
+refused with `AccountSpaceArchiveMissingError` before any export runs.
+
 ### Writing and reading a bundle
 
 ```js

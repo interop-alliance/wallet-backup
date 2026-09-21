@@ -1,5 +1,18 @@
 # @interop/wallet-backup Changelog
 
+## 0.2.0 - TBD
+
+### Added
+
+- Export ceremony (`src/bundle/exportBundle.ts`):
+  `exportBundle({ meta, issueRecoveryCode, listSpaces, exportSpace, exportPassphrase, onProgress, signal })`
+  issues the account's recovery code, then lists the account's Spaces, exports
+  each through the host's per-Space primitive in the order listed, and packs the
+  bundle. The code is minted first so the bundle carries the unlock Space it
+  opens, and the code string is never returned. A failed Space export fails the
+  ceremony, naming the Space with the host's error as `cause`, and a list naming
+  no account Space refuses with `AccountSpaceArchiveMissingError`.
+
 ## 0.1.0 - 2026-09-19
 
 ### Added

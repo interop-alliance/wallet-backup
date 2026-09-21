@@ -41,6 +41,12 @@ export interface BundleSpaceInput {
  * header carries its entry's size, so the bytes have to be in hand before the
  * entry is written.
  *
+ * The pack is finalized before it is returned, with no consumer attached, so
+ * the whole bundle is buffered in the pack's own backpressure queue until the
+ * caller drains it. A host that saves to a file therefore sees the file appear
+ * only once the export has finished. WBU-5 tracks the streaming writer that
+ * writes entries as the consumer drains.
+ *
  * @param options {object}
  * @param options.meta {BundleMeta}   the bundle's provenance
  * @param options.spaces {BundleSpaceInput[]}   the Space archives, in pack

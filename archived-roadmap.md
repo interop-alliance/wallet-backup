@@ -198,3 +198,38 @@ was needed on the way: the four collection names the walk takes from
 transport graph (`provisioning.ts`, `deleteSpace.ts`), so wallet-core gained a
 `./space/collections` leaf entry, unpublished as 0.79.1 at closing time. The
 devDependency is a `link:` until it publishes (ARCHITECTURE.md, Current State).
+
+---
+
+### WBU-4: The export ceremony, code before Space list
+
+- status: done (2026-09-20)
+- priority: high
+- labels: bundle, export, ceremony
+- acceptance:
+  - [x] `exportBundle` runs the ordered sequence and hands back the packed
+        bundle, taking the wallet's code issuance, its Space listing and the
+        server's per-Space export primitive as ports.
+  - [x] The recovery code is issued before the Space list is read, so the bundle
+        carries the unlock Space the code opens.
+  - [x] A failed Space export fails the whole ceremony, naming the Space with
+        the host's error as `cause`.
+  - [x] A Space list naming no account Space refuses before any export runs.
+  - [x] Node suite covers the order, both packed forms round-tripping through
+        `readBundle` / `unpackRecoveryCode`, the failing export, the refusal and
+        the abort.
+  - [x] README usage snippet and the ARCHITECTURE layer map and invariant.
+
+Context: the bundle codec could write a bundle but nothing here owned the order
+a wallet has to write one in. Each wallet was left to assemble the sequence
+itself, and getting it wrong is silent: list the account's Spaces before minting
+the recovery code and the code's own unlock Space is not in the list, so the
+bundle ships a code that opens a Space it does not carry. The order belongs
+beside the codec that depends on it.
+
+`discovered-from: freewallet FW-530`. The layering was settled in freewallet's
+FW-531 walk-through (2026-09-15): the package owns the ceremony -- mint the
+code, call the primitive per Space, assemble -- and the transport is a port, so
+the app decides how the file reaches it. `src/bundle/exportBundle.ts` holds it.
+The code string is never returned: it lives for the one `packRecoveryCode` call
+and is dropped when the ceremony ends.

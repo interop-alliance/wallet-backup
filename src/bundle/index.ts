@@ -25,6 +25,9 @@ export type {
   BundleSpaceRole
 } from './manifest.js'
 
+export { exportBundle } from './exportBundle.js'
+export type { ExportStage } from './exportBundle.js'
+
 export { writeBundle } from './writeBundle.js'
 export type { BundleSpaceInput } from './writeBundle.js'
 
