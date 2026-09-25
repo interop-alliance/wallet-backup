@@ -39,8 +39,8 @@ export interface BundleSpaceEntry {
 export interface Bundle {
   manifest: BundleManifest
   /**
-   * the small top-level files, e.g. `recovery-code.json`, by file name. Only
-   * the ones packed ahead of the `spaces/` directory are read.
+   * the small top-level files, e.g. `backup-credential.json`, by file name.
+   * Only the ones packed ahead of the `spaces/` directory are read.
    */
   files: Map<string, Uint8Array>
   /** the archive path of each Space archive to the role the manifest gave it */

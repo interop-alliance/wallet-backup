@@ -2,19 +2,20 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 import { describe, expect, it } from 'vitest'
+import { base64urlnopad } from '@scure/base'
 import { collectBytes, packSpaceArchive } from '@interop/space-archive'
 import {
   exportBundle,
   readBundle,
-  unpackRecoveryCode,
-  BUNDLE_ROLE,
-  RECOVERY_CODE_FILE
+  unpackBackupCredential,
+  BACKUP_CREDENTIAL_FILE,
+  BUNDLE_ROLE
 } from '../../src/index.js'
 import type { BundleMeta } from '../../src/index.js'
 
 const ACCOUNT_SPACE_ID = 'zAccountSpace'
 const UNLOCK_SPACE_ID = 'zUnlockSpace'
-const RECOVERY_CODE = 'z3fixtureRecoveryCodeValue'
+const CREDENTIAL_SECRET = new Uint8Array(32).map((_, index) => index + 1)
 
 const meta: BundleMeta = {
   created: '2026-09-20T00:00:00.000Z',
@@ -26,7 +27,7 @@ const meta: BundleMeta = {
 
 /**
  * The Spaces a healthy account names: the account Space and the unlock Space
- * the freshly issued recovery code just wrote.
+ * the freshly established backup credential just wrote.
  */
 const accountSpaces = [
   { spaceId: ACCOUNT_SPACE_ID, role: BUNDLE_ROLE.accountSpaceArchive },
@@ -77,34 +78,36 @@ async function raised(run: () => Promise<unknown>): Promise<Error> {
 }
 
 /**
- * The packed `recovery-code.json` document an opened bundle carries.
+ * The packed `backup-credential.json` document an opened bundle carries.
  * @param bundle {object}
  * @returns {unknown}
  */
-function packedCodeOf(bundle: { files: Map<string, Uint8Array> }): unknown {
-  const bytes = bundle.files.get(RECOVERY_CODE_FILE)
+function packedCredentialOf(bundle: {
+  files: Map<string, Uint8Array>
+}): unknown {
+  const bytes = bundle.files.get(BACKUP_CREDENTIAL_FILE)
   if (bytes === undefined) {
-    throw new Error('The bundle carries no packed recovery code.')
+    throw new Error('The bundle carries no packed backup credential.')
   }
   return JSON.parse(new TextDecoder().decode(bytes))
 }
 
 describe('exportBundle', () => {
-  it('issues the code before it lists the Spaces, and lists before it exports', async () => {
+  it('establishes the credential before it lists the Spaces, and lists before it exports', async () => {
     const order: string[] = []
-    let codeIssued = false
+    let established = false
     await packedBytes(
       await exportBundle({
         meta,
-        async issueRecoveryCode() {
-          order.push('issue-start')
+        async establishBackupCredential() {
+          order.push('establish-start')
           await Promise.resolve()
-          codeIssued = true
-          order.push('issue-end')
-          return RECOVERY_CODE
+          established = true
+          order.push('establish-end')
+          return CREDENTIAL_SECRET.slice()
         },
         async listSpaces() {
-          expect(codeIssued).toBe(true)
+          expect(established).toBe(true)
           order.push('list')
           return accountSpaces
         },
@@ -116,20 +119,37 @@ describe('exportBundle', () => {
     )
 
     expect(order).toEqual([
-      'issue-start',
-      'issue-end',
+      'establish-start',
+      'establish-end',
       'list',
       `export:${ACCOUNT_SPACE_ID}`,
       `export:${UNLOCK_SPACE_ID}`
     ])
   })
 
-  it('writes a bundle whose plain code and Space archives read back', async () => {
+  it('zeroes the secret the host hands over once the credential is packed', async () => {
+    const handed = CREDENTIAL_SECRET.slice()
+    let zeroedBeforeList = false
+    await packedBytes(
+      await exportBundle({
+        meta,
+        establishBackupCredential: async () => handed,
+        async listSpaces() {
+          zeroedBeforeList = handed.every(byte => byte === 0)
+          return accountSpaces
+        },
+        exportSpace: async ({ spaceId }) => packFixtureArchive(spaceId)
+      })
+    )
+    expect(zeroedBeforeList).toBe(true)
+  })
+
+  it('writes a bundle whose plain credential and Space archives read back', async () => {
     const stages: { stage: string; spaceId?: string }[] = []
     const bytes = await packedBytes(
       await exportBundle({
         meta,
-        issueRecoveryCode: async () => RECOVERY_CODE,
+        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
         listSpaces: async () => accountSpaces,
         exportSpace: async ({ spaceId }) => packFixtureArchive(spaceId),
         onProgress: options => stages.push(options)
@@ -142,8 +162,13 @@ describe('exportBundle', () => {
       [`spaces/${ACCOUNT_SPACE_ID}.tar`, BUNDLE_ROLE.accountSpaceArchive],
       [`spaces/${UNLOCK_SPACE_ID}.tar`, BUNDLE_ROLE.unlockSpaceArchive]
     ])
-    expect(await unpackRecoveryCode({ document: packedCodeOf(bundle) })).toBe(
-      RECOVERY_CODE
+    const document = packedCredentialOf(bundle)
+    expect(document).toEqual({
+      form: 'plain',
+      secret: base64urlnopad.encode(CREDENTIAL_SECRET)
+    })
+    expect(await unpackBackupCredential({ document })).toEqual(
+      CREDENTIAL_SECRET
     )
 
     const walked: string[] = []
@@ -154,30 +179,32 @@ describe('exportBundle', () => {
     expect(walked).toEqual([ACCOUNT_SPACE_ID, UNLOCK_SPACE_ID])
 
     expect(stages).toEqual([
-      { stage: 'issuing-code' },
+      { stage: 'establishing-credential' },
       { stage: 'exporting-space', spaceId: ACCOUNT_SPACE_ID },
       { stage: 'exporting-space', spaceId: UNLOCK_SPACE_ID },
       { stage: 'packing' }
     ])
   })
 
-  it('seals the packed code under an export passphrase', async () => {
+  it('seals the packed credential under an export passphrase', async () => {
     const exportPassphrase = 'correct horse battery staple'
     const bytes = await packedBytes(
       await exportBundle({
         meta,
         exportPassphrase,
-        issueRecoveryCode: async () => RECOVERY_CODE,
+        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
         listSpaces: async () => accountSpaces,
         exportSpace: async ({ spaceId }) => packFixtureArchive(spaceId)
       })
     )
 
-    const document = packedCodeOf(await readBundle(bytes))
-    expect(JSON.stringify(document)).not.toContain(RECOVERY_CODE)
-    expect(await unpackRecoveryCode({ document, exportPassphrase })).toBe(
-      RECOVERY_CODE
+    const document = packedCredentialOf(await readBundle(bytes))
+    expect(JSON.stringify(document)).not.toContain(
+      base64urlnopad.encode(CREDENTIAL_SECRET)
     )
+    expect(
+      await unpackBackupCredential({ document, exportPassphrase })
+    ).toEqual(CREDENTIAL_SECRET)
   })
 
   it('fails the whole ceremony when one Space export fails', async () => {
@@ -185,7 +212,7 @@ describe('exportBundle', () => {
     const err = await raised(() =>
       exportBundle({
         meta,
-        issueRecoveryCode: async () => RECOVERY_CODE,
+        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
         listSpaces: async () => accountSpaces,
         async exportSpace({ spaceId }) {
           if (spaceId === UNLOCK_SPACE_ID) {
@@ -205,7 +232,7 @@ describe('exportBundle', () => {
     const err = await raised(() =>
       exportBundle({
         meta,
-        issueRecoveryCode: async () => RECOVERY_CODE,
+        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
         listSpaces: async () => [
           { spaceId: UNLOCK_SPACE_ID, role: BUNDLE_ROLE.unlockSpaceArchive }
         ],
@@ -227,9 +254,9 @@ describe('exportBundle', () => {
       exportBundle({
         meta,
         signal: controller.signal,
-        async issueRecoveryCode() {
+        async establishBackupCredential() {
           controller.abort(new Error('the user cancelled'))
-          return RECOVERY_CODE
+          return CREDENTIAL_SECRET.slice()
         },
         async listSpaces() {
           listed = true
@@ -249,7 +276,7 @@ describe('exportBundle', () => {
       exportBundle({
         meta,
         signal: controller.signal,
-        issueRecoveryCode: async () => RECOVERY_CODE,
+        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
         async listSpaces() {
           controller.abort(new Error('the user cancelled'))
           return accountSpaces

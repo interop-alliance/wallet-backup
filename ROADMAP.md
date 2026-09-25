@@ -59,3 +59,12 @@ lets the picked file fill as the export proceeds.
   - [ ] The three host-facing comments corrected for FW-530 (`exportBundle.ts`,
         `writeBundle.ts`, freewallet's `backupExport.ts` and `saveStream.ts`)
         are updated to the streaming behavior
+  - [ ] `exportBundle` hands back a `ReadableStream<Uint8Array>` (or the package
+        exports the AsyncIterable-to-ReadableStream adapter), so a host neither
+        casts the pack's `unknown` chunks nor writes the adapter itself
+        (freewallet's `streamFromPack` is the copy to delete)
+  - [ ] The writer bounds how many Space exports are in flight (a small fixed
+        number ahead of the entry being written) rather than one at a time, so
+        an account with many recovery codes is not strictly serial; the bound,
+        not the host, decides, since the host's per-Space callback cannot see
+        the consumer's backpressure

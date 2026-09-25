@@ -56,7 +56,7 @@ import type { MigrationSink, SinkOutcome } from './sink.js'
  * @param options.bundle {ByteSource}   the outer bundle tar's bytes, or a
  *   stream of them
  * @param options.secret {MigrationSecret}   the old account's unlock
- *   passphrase, its recovery code, or the code the bundle carries
+ *   passphrase, its recovery code, or the backup credential the bundle carries
  * @param options.sink {MigrationSink}   the host's import functions
  * @param [options.signal] {AbortSignal}   checked between rows; the walk
  *   throws its `reason`

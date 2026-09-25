@@ -1,5 +1,39 @@
 # @interop/wallet-backup Changelog
 
+## 0.3.0 - TBD
+
+### Changed
+
+- Breaking: the bundle packs a backup credential in place of a recovery code.
+  The top-level file is `backup-credential.json` (was `recovery-code.json`),
+  listed in the manifest's `contents` under `#packed-backup-credential` (was
+  `#packed-recovery-code`). Its document is `{ form: 'plain', secret }` or
+  `{ form: 'sealed', kdf, encryption, wrapped }`, where `secret` is the
+  credential's 32 bytes, base64url without padding, and the sealed envelope
+  carries `{ secret }`. `packRecoveryCode` / `unpackRecoveryCode` /
+  `PackedRecoveryCode` / `RECOVERY_CODE_FILE` / `BUNDLE_ROLE.packedRecoveryCode`
+  become `packBackupCredential({ secret })` / `unpackBackupCredential()`
+  (returns the bytes) / `PackedBackupCredential` / `BACKUP_CREDENTIAL_FILE` /
+  `BUNDLE_ROLE.packedBackupCredential`. A secret that is not base64url-nopad or
+  not 32 bytes is refused with `BundleInvalidError`, as is a sealed document
+  whose `kdf` is not the keyring Argon2id parameter set under a per-bundle salt;
+  the check runs before any derivation.
+- Breaking: `exportBundle`'s `issueRecoveryCode: () => Promise<string>` port is
+  now `establishBackupCredential: () => Promise<Uint8Array>`, and its
+  `'issuing-code'` stage is now `'establishing-credential'`. `writeBundle` and
+  `buildBundleManifest` take `backupCredential` in place of `recoveryCode`. The
+  ceremony zeroes the secret buffer the port answers as soon as the credential
+  is packed.
+- Breaking: the `{ packedCode }` migration secret is now
+  `{ packedCredential: { exportPassphrase? } }`. It derives the recipient
+  through wallet-core's `BACKUP_CREDENTIAL_KDF` and the standing client
+  derivation, and zeroes the secret bytes, the derived seed, and the derived
+  client seed and binding MAC key once the recipient key is derived. The
+  export-passphrase derivation zeroes the same material at both the sealing and
+  the opening call.
+- Requires `@interop/wallet-core` `>=0.80.0` (peer and dev dependency), for
+  `BACKUP_CREDENTIAL_KDF`.
+
 ## 0.2.1 - 2026-09-20
 
 ### Changed

@@ -320,15 +320,16 @@ export function keyMapDir(body: string): ArchiveEntry {
  *
  * @param options {object}
  * @param options.entries {ArchiveEntry[]}   the Space's entry tree
- * @param [options.recoveryCode] {unknown}   the packed code document
+ * @param [options.backupCredential] {unknown}   the packed credential
+ *   document
  * @returns {Promise<Uint8Array>}   the bundle's tar bytes
  */
 export async function buildBundle({
   entries,
-  recoveryCode
+  backupCredential
 }: {
   entries: ArchiveEntry[]
-  recoveryCode?: unknown
+  backupCredential?: unknown
 }): Promise<Uint8Array> {
   const archive = await collectBytes(
     (await packSpaceArchive({
@@ -345,7 +346,7 @@ export async function buildBundle({
         archive
       }
     ],
-    ...(recoveryCode !== undefined && { recoveryCode })
+    ...(backupCredential !== undefined && { backupCredential })
   })
   return collectBytes(pack as unknown as AsyncIterable<Uint8Array>)
 }

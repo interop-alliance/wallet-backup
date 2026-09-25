@@ -31,8 +31,8 @@ Postgres backend, and parsed by no client.
 
 `@interop/wallet-backup` owns the whole read side: the outer tar codec,
 the manifest parse and archive-role vocabulary, the per-Space archive
-reader and writer with the file-name codec, the packed-code reading and
-unsealing, the derivation, the decrypt walk, and the report. It issues
+reader and writer with the file-name codec, the packed backup credential's reading
+and unsealing, the derivation, the decrypt walk, and the report. It issues
 no HTTP request and holds no collection in memory.
 
 The walk drives the loop (push). The host passes a sink with one method
@@ -94,8 +94,8 @@ The per-Space archive codec's one implementation now lives in
 for the bundle codec and for the migration walk; the WAS reference
 server consumes it for export. This package stays the migration walk's
 home: the decision above still holds for the outer tar codec, the
-manifest parse and archive-role vocabulary, the packed-code reading and
-unsealing, the derivation, the decrypt walk, and the report. Only the
+manifest parse and archive-role vocabulary, the packed backup credential's reading
+and unsealing, the derivation, the decrypt walk, and the report. Only the
 per-Space archive reader and writer moved, because the server needed
 only the codec and was installing the walk's whole dependency set
 (`@interop/wallet-core`, `@interop/was-client`, `@interop/social-core`,

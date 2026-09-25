@@ -17,9 +17,9 @@ import { UBC_MANIFEST_URL } from '@interop/space-archive'
 export const BUNDLE_MANIFEST_FILE = 'manifest.yml'
 
 /**
- * The packed recovery code's file name, an optional top-level entry.
+ * The packed backup credential's file name, an optional top-level entry.
  */
-export const RECOVERY_CODE_FILE = 'recovery-code.json'
+export const BACKUP_CREDENTIAL_FILE = 'backup-credential.json'
 
 /**
  * The directory holding one per-Space export archive per Space.
@@ -47,14 +47,14 @@ export const BUNDLE_SPEC = {
  * The role a `contents` entry's `url` names: which part of the profile the
  * entry plays. `spaceArchives` annotates the `spaces/` directory itself; the
  * three Space roles annotate one `spaces/<spaceId>.tar` each; and
- * `packedRecoveryCode` annotates `recovery-code.json`.
+ * `packedBackupCredential` annotates `backup-credential.json`.
  */
 export const BUNDLE_ROLE = {
   spaceArchives: `${PROFILE_SPEC_URL}#space-archives`,
   accountSpaceArchive: `${PROFILE_SPEC_URL}#account-space-archive`,
   clientAnnexSpaceArchive: `${PROFILE_SPEC_URL}#client-annex-space-archive`,
   unlockSpaceArchive: `${PROFILE_SPEC_URL}#unlock-space-archive`,
-  packedRecoveryCode: `${PROFILE_SPEC_URL}#packed-recovery-code`
+  packedBackupCredential: `${PROFILE_SPEC_URL}#packed-backup-credential`
 } as const
 
 /**
@@ -121,25 +121,25 @@ export function spaceArchivePath(spaceId: string): string {
 
 /**
  * Builds the bundle's manifest document: the FEP-6fcd `contents` tree over the
- * manifest itself, the optional packed recovery code, and the `spaces/`
+ * manifest itself, the optional packed backup credential, and the `spaces/`
  * directory with one role-annotated entry per Space, in the order they are
  * packed.
  * @param options {object}
  * @param options.meta {BundleMeta}
  * @param options.spaces {Array<{ spaceId: string, role: string }>}   the Space
  *   archives, in pack order
- * @param [options.recoveryCode] {boolean}   whether the bundle carries a
- *   `recovery-code.json` entry
+ * @param [options.backupCredential] {boolean}   whether the bundle carries a
+ *   `backup-credential.json` entry
  * @returns {BundleManifest}
  */
 export function buildBundleManifest({
   meta,
   spaces,
-  recoveryCode = false
+  backupCredential = false
 }: {
   meta: BundleMeta
   spaces: { spaceId: string; role: string }[]
-  recoveryCode?: boolean
+  backupCredential?: boolean
 }): BundleManifest {
   return {
     'ubc-version': '0.1',
@@ -147,8 +147,8 @@ export function buildBundleManifest({
     spec: { ...BUNDLE_SPEC },
     contents: {
       [BUNDLE_MANIFEST_FILE]: { url: UBC_MANIFEST_URL },
-      ...(recoveryCode && {
-        [RECOVERY_CODE_FILE]: { url: BUNDLE_ROLE.packedRecoveryCode }
+      ...(backupCredential && {
+        [BACKUP_CREDENTIAL_FILE]: { url: BUNDLE_ROLE.packedBackupCredential }
       }),
       [SPACES_DIRECTORY]: {
         url: BUNDLE_ROLE.spaceArchives,

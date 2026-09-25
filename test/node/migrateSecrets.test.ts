@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The two migration secrets that run through the keyring's Argon2id
- * derivation -- an unlock passphrase, and a packed recovery code sealed to an
- * export passphrase -- and the wipe the walk owes its caller when it ends.
+ * The migration secrets that derive an unlock seed -- an unlock passphrase,
+ * and a packed backup credential in the clear or sealed to an export
+ * passphrase -- and the wipe the walk owes its caller when it ends.
  *
  * Both wallet-core subpaths the walk derives through are wrapped here rather
  * than replaced: the real functions run, and the wrapper keeps a reference to
@@ -13,17 +13,19 @@
  * no key material back.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
-import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
 import {
-  generateRecoveryCode,
-  recoveryClientFromCode
-} from '@interop/wallet-core/recovery/recoveryCode'
+  BACKUP_CREDENTIAL_KDF,
+  deriveUnlockSeed,
+  KEYRING_KDF
+} from '@interop/wallet-core/keyring/kdf'
+import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
 import { CONTACTS_COLLECTION } from '@interop/social-core'
 import {
   migrateBundle,
-  packRecoveryCode,
-  unpackRecoveryCode
+  packBackupCredential,
+  recipientFromSecret,
+  unpackBackupCredential,
+  BACKUP_CREDENTIAL_FILE
 } from '../../src/index.js'
 import type { MigrationSink, SinkOutcome } from '../../src/index.js'
 import {
@@ -91,6 +93,22 @@ const PASSPHRASE = 'correct horse battery staple'
 const EXPORT_PASSPHRASE = 'an export passphrase'
 
 /**
+ * Mints a backup credential's secret and the standing client it derives,
+ * through the backup credential's own KDF, independently of the code under
+ * test.
+ * @returns {Promise<{ secret: Uint8Array, client: Awaited<ReturnType<typeof standingClientFromUnlockSeed>> }>}
+ */
+async function backupCredential() {
+  const secret = crypto.getRandomValues(new Uint8Array(32))
+  const unlockSeed = await deriveUnlockSeed({
+    secret,
+    kdf: BACKUP_CREDENTIAL_KDF
+  })
+  const client = await standingClientFromUnlockSeed({ unlockSeed })
+  return { secret, client }
+}
+
+/**
  * A sink that accepts everything and counts the rows it saw.
  * @returns {MigrationSink & { rows: unknown[] }}
  */
@@ -122,15 +140,16 @@ function acceptingSink(): MigrationSink & { rows: unknown[] } {
  *
  * @param options {object}
  * @param options.recipients {Array<{ id: string, publicKeyMultibase: string }>}
- * @param [options.recoveryCode] {unknown}   the packed code document
+ * @param [options.backupCredential] {unknown}   the packed credential
+ *   document
  * @returns {Promise<Uint8Array>}
  */
 async function oneCollectionBundle({
   recipients,
-  recoveryCode
+  backupCredential
 }: {
   recipients: Array<{ id: string; publicKeyMultibase: string }>
-  recoveryCode?: unknown
+  backupCredential?: unknown
 }): Promise<Uint8Array> {
   const [generation] = await mintGenerations(1)
   const roster = await rosterDescriptor({
@@ -161,7 +180,7 @@ async function oneCollectionBundle({
   ]
   return buildBundle({
     entries,
-    ...(recoveryCode !== undefined && { recoveryCode })
+    ...(backupCredential !== undefined && { backupCredential })
   })
 }
 
@@ -197,24 +216,65 @@ describe('migrateBundle secrets', () => {
     expect(report.collections[CONTACTS_COLLECTION]!.accepted).toBe(1)
   }, 120000)
 
-  it('opens the bundle with a sealed packed recovery code', async () => {
-    const code = generateRecoveryCode()
-    const client = await recoveryClientFromCode({ code })
+  it('opens the bundle with a plain packed backup credential', async () => {
+    const { secret, client } = await backupCredential()
     const bundle = await oneCollectionBundle({
       recipients: [recipientFor(client.agents.keyAgreementKey)],
-      recoveryCode: await packRecoveryCode({
-        code,
+      backupCredential: await packBackupCredential({ secret })
+    })
+    const sink = acceptingSink()
+    await migrateBundle({
+      bundle,
+      secret: { packedCredential: {} },
+      sink
+    })
+    expect(sink.rows).toEqual([{ contactId: 'c-1' }])
+  }, 120000)
+
+  it('opens the bundle with a sealed packed backup credential', async () => {
+    const { secret, client } = await backupCredential()
+    const bundle = await oneCollectionBundle({
+      recipients: [recipientFor(client.agents.keyAgreementKey)],
+      backupCredential: await packBackupCredential({
+        secret,
         exportPassphrase: EXPORT_PASSPHRASE
       })
     })
     const sink = acceptingSink()
     await migrateBundle({
       bundle,
-      secret: { packedCode: { exportPassphrase: EXPORT_PASSPHRASE } },
+      secret: { packedCredential: { exportPassphrase: EXPORT_PASSPHRASE } },
       sink
     })
     expect(sink.rows).toEqual([{ contactId: 'c-1' }])
   }, 120000)
+
+  it('derives the same recipient as BACKUP_CREDENTIAL_KDF directly', async () => {
+    const { secret, client } = await backupCredential()
+    const packed = await packBackupCredential({ secret })
+    const files = new Map([
+      [BACKUP_CREDENTIAL_FILE, new TextEncoder().encode(JSON.stringify(packed))]
+    ])
+    const recipient = await recipientFromSecret({
+      secret: { packedCredential: {} },
+      files
+    })
+    expect(recipient.keyAgreementKey.id).toBe(client.agents.keyAgreementKey.id)
+    expect(recipientFor(recipient.keyAgreementKey)).toEqual(
+      recipientFor(client.agents.keyAgreementKey)
+    )
+    // The credential's seed is wiped here rather than handed to the walk.
+    expect(recipient.unlockSeed).toBeUndefined()
+  }, 120000)
+
+  it('refuses a packed-credential secret when the bundle carries none', async () => {
+    await expect(
+      recipientFromSecret({
+        secret: { packedCredential: {} },
+        files: new Map()
+      })
+    ).rejects.toMatchObject({ name: 'BundleInvalidError' })
+  })
 
   it('zeroes every generation secret and the derived seed when the walk ends', async () => {
     recovered.length = 0
@@ -246,14 +306,13 @@ describe('migrateBundle secrets', () => {
     }
   }, 120000)
 
-  it('zeroes the export passphrase seed on the packed-code path', async () => {
-    const code = generateRecoveryCode()
-    const client = await recoveryClientFromCode({ code })
-    // `packRecoveryCode` derives one seed of its own, so the assertion covers
-    // the sealing side too.
+  it('zeroes the export passphrase and credential seeds on the packed-credential path', async () => {
+    const { secret, client } = await backupCredential()
+    // `packBackupCredential` derives one seed of its own, so the assertion
+    // covers the sealing side too.
     seeds.length = 0
-    const packed = await packRecoveryCode({
-      code,
+    const packed = await packBackupCredential({
+      secret,
       exportPassphrase: EXPORT_PASSPHRASE
     })
     expect(seeds).toHaveLength(1)
@@ -261,17 +320,18 @@ describe('migrateBundle secrets', () => {
 
     const bundle = await oneCollectionBundle({
       recipients: [recipientFor(client.agents.keyAgreementKey)],
-      recoveryCode: packed
+      backupCredential: packed
     })
     recovered.length = 0
     seeds.length = 0
     await migrateBundle({
       bundle,
-      secret: { packedCode: { exportPassphrase: EXPORT_PASSPHRASE } },
+      secret: { packedCredential: { exportPassphrase: EXPORT_PASSPHRASE } },
       sink: acceptingSink()
     })
 
-    expect(seeds).toHaveLength(1)
+    // One seed from the export passphrase, one from the credential's secret.
+    expect(seeds).toHaveLength(2)
     for (const seed of seeds) {
       expect(seed.every(byte => byte === 0)).toBe(true)
     }
@@ -282,18 +342,18 @@ describe('migrateBundle secrets', () => {
   }, 120000)
 
   it('zeroes the export passphrase seed on a direct unpack', async () => {
-    const code = generateRecoveryCode()
-    const packed = await packRecoveryCode({
-      code,
+    const { secret } = await backupCredential()
+    const packed = await packBackupCredential({
+      secret,
       exportPassphrase: EXPORT_PASSPHRASE
     })
     seeds.length = 0
     expect(
-      await unpackRecoveryCode({
+      await unpackBackupCredential({
         document: packed,
         exportPassphrase: EXPORT_PASSPHRASE
       })
-    ).toBe(code)
+    ).toEqual(secret)
     expect(seeds).toHaveLength(1)
     expect(seeds[0]!.every(byte => byte === 0)).toBe(true)
   }, 120000)

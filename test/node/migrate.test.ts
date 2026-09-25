@@ -10,6 +10,11 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
+  BACKUP_CREDENTIAL_KDF,
+  deriveUnlockSeed
+} from '@interop/wallet-core/keyring/kdf'
+import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
+import {
   generateRecoveryCode,
   recoveryClientFromCode
 } from '@interop/wallet-core/recovery/recoveryCode'
@@ -30,7 +35,7 @@ import type { RecipientPublicKey } from '@interop/was-client/edv/core'
 import { collectBytes, packSpaceArchive } from '@interop/space-archive'
 import {
   migrateBundle,
-  packRecoveryCode,
+  packBackupCredential,
   writeBundle,
   BUNDLE_ROLE
 } from '../../src/index.js'
@@ -90,7 +95,8 @@ async function recoverySecret(): Promise<{
  * @param options.recipients {RecipientPublicKey[]}
  * @param options.collections {FixtureCollection[]}
  * @param [options.rosterWithoutWrapFor] {ReadonlySet<string>}
- * @param [options.recoveryCode] {unknown}   the packed code document
+ * @param [options.backupCredential] {unknown}   the packed credential
+ *   document
  * @returns {Promise<Uint8Array>}
  */
 async function fixtureBundle({
@@ -98,13 +104,13 @@ async function fixtureBundle({
   recipients,
   collections,
   rosterWithoutWrapFor,
-  recoveryCode
+  backupCredential
 }: {
   generations: Generation[]
   recipients: RecipientPublicKey[]
   collections: FixtureCollection[]
   rosterWithoutWrapFor?: ReadonlySet<string>
-  recoveryCode?: unknown
+  backupCredential?: unknown
 }): Promise<Uint8Array> {
   const roster = await rosterDescriptor({
     generations,
@@ -150,7 +156,7 @@ async function fixtureBundle({
   }
   return buildBundle({
     entries,
-    ...(recoveryCode !== undefined && { recoveryCode })
+    ...(backupCredential !== undefined && { backupCredential })
   })
 }
 
@@ -285,19 +291,22 @@ describe('migrateBundle', () => {
     expect(report.stoppedAt).toBeUndefined()
   })
 
-  it('opens the bundle with a plain packed recovery code', async () => {
+  it('opens the bundle with a plain packed backup credential', async () => {
     const [generation] = await mintGenerations(1)
-    const { code, recipient } = await recoverySecret()
+    const secret = crypto.getRandomValues(new Uint8Array(32))
+    const client = await standingClientFromUnlockSeed({
+      unlockSeed: await deriveUnlockSeed({ secret, kdf: BACKUP_CREDENTIAL_KDF })
+    })
     const bundle = await fixtureBundle({
       generations: [generation!],
-      recipients: [recipient],
+      recipients: [recipientFor(client.agents.keyAgreementKey)],
       collections: standardCollections(generation!),
-      recoveryCode: await packRecoveryCode({ code })
+      backupCredential: await packBackupCredential({ secret })
     })
     const sink = recordingSink()
     const report = await migrateBundle({
       bundle,
-      secret: { packedCode: {} },
+      secret: { packedCredential: {} },
       sink
     })
     expect(sink.calls).toHaveLength(4)

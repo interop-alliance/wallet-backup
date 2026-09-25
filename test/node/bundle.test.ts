@@ -14,8 +14,8 @@ import {
   bundleManifestSummary,
   readBundle,
   writeBundle,
-  BUNDLE_ROLE,
-  RECOVERY_CODE_FILE
+  BACKUP_CREDENTIAL_FILE,
+  BUNDLE_ROLE
 } from '../../src/index.js'
 import type { Bundle, BundleMeta } from '../../src/index.js'
 
@@ -65,10 +65,12 @@ async function packedBytes(pack: unknown): Promise<Uint8Array> {
 
 /**
  * Writes a two-Space bundle over the fixture archive.
- * @param [recoveryCode] {unknown}
+ * @param [backupCredential] {unknown}
  * @returns {Promise<Uint8Array>}
  */
-async function writeFixtureBundle(recoveryCode?: unknown): Promise<Uint8Array> {
+async function writeFixtureBundle(
+  backupCredential?: unknown
+): Promise<Uint8Array> {
   const archive = await packFixtureArchive()
   return packedBytes(
     await writeBundle({
@@ -85,7 +87,7 @@ async function writeFixtureBundle(recoveryCode?: unknown): Promise<Uint8Array> {
           archive
         }
       ],
-      ...(recoveryCode === undefined ? {} : { recoveryCode })
+      ...(backupCredential === undefined ? {} : { backupCredential })
     })
   )
 }
@@ -178,7 +180,11 @@ async function writeBundleWithLargeUnlockSpace(): Promise<Uint8Array> {
 
 describe('writeBundle and readBundle', () => {
   it('round-trips a bundle and its Space archives', async () => {
-    const bytes = await writeFixtureBundle({ form: 'plain', code: 'a-code' })
+    const packed = {
+      form: 'plain',
+      secret: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+    }
+    const bytes = await writeFixtureBundle(packed)
     const bundle = await readBundle(bytes)
 
     expect(bundle.manifest['ubc-version']).toBe('0.1')
@@ -192,9 +198,15 @@ describe('writeBundle and readBundle', () => {
       meta,
       spec: bundle.manifest.spec
     })
+    expect(BACKUP_CREDENTIAL_FILE).toBe('backup-credential.json')
+    expect(bundle.manifest.contents['backup-credential.json']).toEqual({
+      url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#packed-backup-credential'
+    })
     expect(
-      JSON.parse(new TextDecoder().decode(bundle.files.get(RECOVERY_CODE_FILE)))
-    ).toEqual({ form: 'plain', code: 'a-code' })
+      JSON.parse(
+        new TextDecoder().decode(bundle.files.get(BACKUP_CREDENTIAL_FILE))
+      )
+    ).toEqual(packed)
     expect([...bundle.roles.entries()]).toEqual([
       [`spaces/${FIXTURE_SPACE_ID}.tar`, BUNDLE_ROLE.accountSpaceArchive],
       ['spaces/zUnlockSpace.tar', BUNDLE_ROLE.unlockSpaceArchive]

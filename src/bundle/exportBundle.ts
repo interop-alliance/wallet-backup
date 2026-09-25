@@ -4,40 +4,43 @@
 /**
  * The export ceremony: the ordered sequence that turns a live account into a
  * self-sufficient backup bundle. The package owns the order; the host owns
- * every effect it reaches for, handed in as a port -- the wallet's own code
- * issuance, its Space listing, and the server's per-Space export primitive.
- * Nothing here issues a request or names a transport, so the ceremony runs
- * the same in a browser wallet and in a mobile one.
+ * every effect it reaches for, handed in as a port -- the wallet's own
+ * credential establishment, its Space listing, and the server's per-Space
+ * export primitive. Nothing here issues a request or names a transport, so
+ * the ceremony runs the same in a browser wallet and in a mobile one.
  *
- * The order is the invariant. The recovery code is minted FIRST, through the
- * wallet's issuance ceremony, which writes the code's own unlock Space and a
- * document entry. Only then is the account's Space list read, so the list
- * already names that unlock Space and the bundle carries the Space the packed
- * code opens. A list read first would leave a bundle whose code locates a
- * Space the bundle does not hold.
+ * The order is the invariant. The backup credential is established FIRST,
+ * through the wallet's own establishment of a standing unlock credential,
+ * which writes the credential's unlock Space. Only then is the account's
+ * Space list read, so the list already names that unlock Space and the bundle
+ * carries the Space the packed credential opens. A list read first would
+ * leave a bundle whose credential locates a Space the bundle does not hold.
  *
  * A Space export that fails fails the whole ceremony. A bundle silently
  * missing one sibling Space reads as complete and is not, which is worse than
  * no bundle at all.
  *
- * The code string does not outlive the call. It is held for the one
- * `packRecoveryCode` call and dropped when the ceremony ends -- never
- * returned, never stored on a field.
+ * The credential's secret bytes do not outlive the call. They are held for
+ * the one `packBackupCredential` call and zeroed in place as soon as it
+ * returns, before any Space is listed. They are not returned, and not stored
+ * on a field. The host's buffer is the one zeroed, so a host that needs the
+ * bytes past the export hands over a copy.
  */
 import * as tar from 'tar-stream'
 import { byteChunks } from '@interop/space-archive'
 import type { ByteSource } from '@interop/space-archive'
 import { BUNDLE_ROLE } from './manifest.js'
 import type { BundleMeta } from './manifest.js'
-import { packRecoveryCode } from './recoveryCode.js'
+import { packBackupCredential } from './backupCredential.js'
 import { writeBundle } from './writeBundle.js'
 import { AccountSpaceArchiveMissingError } from '../errors.js'
 
 /**
- * The stage an export ceremony reports: minting the account's recovery code,
+ * The stage an export ceremony reports: establishing the backup credential,
  * exporting one Space (which names the Space), and packing the bundle.
  */
-export type ExportStage = 'issuing-code' | 'exporting-space' | 'packing'
+export type ExportStage =
+  'establishing-credential' | 'exporting-space' | 'packing'
 
 /**
  * Throws the signal's reason when a caller has aborted the ceremony. Called
@@ -55,25 +58,26 @@ function throwIfAborted(signal?: AbortSignal): void {
 /**
  * Runs the export ceremony and hands back the packed bundle.
  *
- * The stages run in exactly this order: the recovery code is issued, the
- * account's Spaces are listed, each listed Space is exported in the order
- * listed, and the bundle is packed. Each Space is exported only when the
- * packer reaches it, so one Space's archive is collected at a time. The pack
- * itself is another matter: `writeBundle` finalizes it with no consumer
- * attached, so the finished bundle sits in memory until the caller drains it
- * (WBU-5 makes the writer stream).
+ * The stages run in exactly this order: the backup credential is established
+ * and its secret packed, the account's Spaces are listed, each listed Space is
+ * exported in the order listed, and the bundle is packed. Each Space is
+ * exported only when the packer reaches it, so one Space's archive is
+ * collected at a time. The pack itself is another matter: `writeBundle`
+ * finalizes it with no consumer attached, so the finished bundle sits in
+ * memory until the caller drains it (WBU-5 makes the writer stream).
  *
  * @param options {object}
  * @param options.meta {BundleMeta}   the bundle's provenance
- * @param options.issueRecoveryCode {function}   mints and registers a recovery
- *   code in the account, and answers the code string
+ * @param options.establishBackupCredential {function}   establishes a
+ *   standing unlock credential in the account, and answers its 32 secret
+ *   bytes; the buffer is zeroed once the credential is packed
  * @param options.listSpaces {function}   answers every Space the account
- *   names, each with a {@link BUNDLE_ROLE} role; called only once the code has
- *   been issued
+ *   names, each with a {@link BUNDLE_ROLE} role; called only once the
+ *   credential has been established
  * @param options.exportSpace {function}   the server's per-Space export
  *   primitive, answering one Space's archive bytes
- * @param [options.exportPassphrase] {string}   seals the packed code when
- *   given; without it the code is packed in the clear
+ * @param [options.exportPassphrase] {string}   seals the packed credential
+ *   when given; without it the secret is packed in the clear
  * @param [options.onProgress] {function}   called at each stage with
  *   `{ stage, spaceId }`, the `spaceId` present on `exporting-space` alone
  * @param [options.signal] {AbortSignal}   checked between stages; the ceremony
@@ -83,7 +87,7 @@ function throwIfAborted(signal?: AbortSignal): void {
  */
 export async function exportBundle({
   meta,
-  issueRecoveryCode,
+  establishBackupCredential,
   listSpaces,
   exportSpace,
   exportPassphrase,
@@ -91,7 +95,7 @@ export async function exportBundle({
   signal
 }: {
   meta: BundleMeta
-  issueRecoveryCode: () => Promise<string>
+  establishBackupCredential: () => Promise<Uint8Array>
   listSpaces: () => Promise<{ spaceId: string; role: string }[]>
   exportSpace: (options: {
     spaceId: string
@@ -102,11 +106,14 @@ export async function exportBundle({
   signal?: AbortSignal
 }): Promise<tar.Pack> {
   throwIfAborted(signal)
-  onProgress?.({ stage: 'issuing-code' })
-  const recoveryCode = await packRecoveryCode({
-    code: await issueRecoveryCode(),
-    exportPassphrase
-  })
+  onProgress?.({ stage: 'establishing-credential' })
+  const secret = await establishBackupCredential()
+  let backupCredential
+  try {
+    backupCredential = await packBackupCredential({ secret, exportPassphrase })
+  } finally {
+    secret.fill(0)
+  }
 
   throwIfAborted(signal)
   const spaces = await listSpaces()
@@ -151,6 +158,6 @@ export async function exportBundle({
       role: space.role,
       archive: archiveOf(space, index === spaces.length - 1)
     })),
-    recoveryCode
+    backupCredential
   })
 }

@@ -6,7 +6,7 @@
 > Backup bundle codec and content-migration walk for portable wallets.
 
 Reads and writes the backup bundle a portable wallet exports: the outer tar with
-its manifest and packed recovery code, and the per-Space export archives it
+its manifest and packed backup credential, and the per-Space export archives it
 carries. Isomorphic (browser, Node.js, React Native) and offline -- bytes in,
 bytes out, no HTTP.
 
@@ -111,29 +111,33 @@ consecutive failures end that collection (its report entry names the cause under
 ends the whole walk, and `report.stoppedAt` names where.
 
 The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
-`{ packedCode: { exportPassphrase } }` -- the last reads the bundle's own
-`recovery-code.json`, unsealing it when the bundle was exported under an export
-passphrase. A secret that is a recipient of nothing in the archived user key
-roster is refused with `BundleRecipientMissingError` before any row is written.
+`{ packedCredential: { exportPassphrase } }`. The last reads the bundle's own
+`backup-credential.json`, unsealing it when the bundle was exported under an
+export passphrase, and derives the backup credential's standing identity from
+its 32 secret bytes through wallet-core's `BACKUP_CREDENTIAL_KDF`. A secret that
+is a recipient of nothing in the archived user key roster is refused with
+`BundleRecipientMissingError` before any row is written.
 
 ### Exporting a bundle
 
-`exportBundle` runs the export ceremony: it mints the account's recovery code
-through the wallet's own issuance, lists the Spaces the account names, exports
-each one through the server's per-Space primitive, and packs the bundle. The
-code is minted first, so the Space list already names the unlock Space that code
-writes and the bundle can be read back on its own. Every effect is a port you
-supply; the package issues no request and never hands the code string back.
+`exportBundle` runs the export ceremony. It has the wallet establish a backup
+credential (a standing unlock credential whose secret is 32 random bytes), lists
+the Spaces the account names, exports each one through the server's per-Space
+primitive, and packs the bundle. The credential is established first, so the
+Space list already names the unlock Space it writes and the bundle can be read
+back on its own. Every effect is a port you supply. The package issues no
+request, and the secret bytes are packed into the bundle rather than returned or
+stored.
 
 ```js
 import { exportBundle } from '@interop/wallet-backup'
 
 const pack = await exportBundle({
   meta: { created, createdBy: { controller, client } },
-  issueRecoveryCode: () => wallet.issueRecoveryCode(),
+  establishBackupCredential: () => wallet.establishBackupCredential(), // 32 bytes
   listSpaces: () => wallet.listSpaces(), // [{ spaceId, role }], roles from BUNDLE_ROLE
   exportSpace: ({ spaceId }) => server.exportSpace(spaceId),
-  exportPassphrase, // optional; seals the packed code when given
+  exportPassphrase, // optional; seals the packed credential when given
   onProgress({ stage, spaceId }) {
     ui.show(spaceId ? `${stage}: ${spaceId}` : stage)
   },
@@ -150,7 +154,7 @@ refused with `AccountSpaceArchiveMissingError` before any export runs.
 
 ```js
 import {
-  packRecoveryCode,
+  packBackupCredential,
   readBundle,
   writeBundle,
   BUNDLE_ROLE
@@ -159,7 +163,7 @@ import {
 const pack = await writeBundle({
   meta: { created, createdBy: { controller, client } },
   spaces: [{ spaceId, role: BUNDLE_ROLE.accountSpaceArchive, archive }],
-  recoveryCode: await packRecoveryCode({ code, exportPassphrase })
+  backupCredential: await packBackupCredential({ secret, exportPassphrase })
 })
 
 const bundle = await readBundle(bytes)

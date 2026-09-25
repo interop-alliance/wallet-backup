@@ -19,13 +19,14 @@ the breaking-release audit checks its statements against the code.
 ```
 src/index.ts              Public entry point (the export map's only door)
 src/errors.ts             The package's error classes, told apart by `name`
+src/standingAgents.ts     One unlock secret to its standing client agents, byproducts wiped
 
 src/bundle/index.ts       The outer bundle codec's door
 src/bundle/manifest.ts    The bundle manifest, its `spec`, and the role anchors
-src/bundle/exportBundle.ts The export ceremony: code, Space list, archives, pack
-src/bundle/writeBundle.ts Packs manifest + packed code + one archive per Space
+src/bundle/exportBundle.ts The export ceremony: credential, Space list, archives, pack
+src/bundle/writeBundle.ts Packs manifest + packed credential + one archive per Space
 src/bundle/readBundle.ts  Opens a bundle; `accountSpaceArchive` finds the account tar
-src/bundle/recoveryCode.ts The packed recovery code, plain or sealed
+src/bundle/backupCredential.ts The packed backup credential, plain or sealed
 
 src/migrate/index.ts              The migration walk's door
 src/migrate/migrateBundle.ts      `migrateBundle`: bundle + secret + sink to a report
@@ -75,11 +76,17 @@ The dependency direction inside this package is one way: `migrate/` reads
    declaring a package that provides it outside Node. A bundler resolves that
    call to the `events` package declared here. Without it the browser spec fails
    inside `tar-stream`.
-5. **A sealed recovery code introduces no cipher context of its own.** It seals
-   through wallet-core's record construction under the keyring cipher context,
-   with the keyring Argon2id parameters and a fresh per-bundle random salt. So
-   no packed code shares a derived key with another bundle or with the wallet's
-   own account derivation.
+5. **A sealed backup credential introduces no cipher context of its own.** It
+   seals through wallet-core's record construction under the keyring cipher
+   context, with the keyring Argon2id parameters and a fresh per-bundle random
+   salt. So no packed credential shares a derived key with another bundle or
+   with the wallet's own account derivation. The credential's own derivation,
+   from its 32 secret bytes to its standing identity, is wallet-core's
+   `BACKUP_CREDENTIAL_KDF`, which this package imports and does not restate. A
+   reader holds a sealed document's KDF descriptor to that parameter set before
+   deriving anything: only the salt may differ, and a descriptor naming another
+   algorithm or cost is refused with `BundleInvalidError`, so a tampered bundle
+   cannot choose the Argon2id work the reader pays.
 6. **Role anchors and manifest URLs are permanent wire text.** They are exported
    constants (`BUNDLE_ROLE`, the six archive manifest URLs) and are copied,
    never rewritten -- a reader finds the account Space archive by matching an
@@ -105,24 +112,28 @@ The dependency direction inside this package is one way: `migrate/` reads
 8. **Key material does not outlive the walk, as far as it can be scrubbed.**
    `migrateBundle` zeroes every recovered generation's raw `secret` and every
    derived unlock seed in a `finally`, so an abort and a refusal drop them as an
-   ordinary end does, and nothing key-shaped is in the report. The packed
-   recovery code's own derivation does the same, at both the sealing and the
-   opening call. The bound is what can be overwritten in place: the key objects
-   built from that material -- the `X25519KeyAgreementKey2020` instances
+   ordinary end does, and nothing key-shaped is in the report. The packed backup
+   credential's export-passphrase derivation does the same, at both the sealing
+   and the opening call. The unpacked secret bytes and the unlock seed derived
+   from them are zeroed as soon as the recipient key is derived, and so are the
+   client seed and binding MAC key every standing client derivation hands back
+   beside its agents. The bound is what can be overwritten in place: the key
+   objects built from that material -- the `X25519KeyAgreementKey2020` instances
    `userKeyVaultKeys` and the client derivations return -- carry their private
    half as an immutable `privateKeyMultibase` string, which no code can scrub.
    Those are dropped when the walk ends and reclaimed by garbage collection, on
    the collector's schedule rather than the walk's.
-9. **An export mints the recovery code before it reads the Space list.**
-   `exportBundle` runs the ceremony in one order: issue the code through the
-   host's own issuance port, then list the Spaces, then export each in the order
-   listed, then pack. The issuance writes the code's own unlock Space, so
-   reading the list second is what makes the bundle self-sufficient -- the code
-   a reader unpacks opens a Space that bundle carries. A list naming no account
-   Space refuses before any export runs, and a Space export that fails fails the
-   whole ceremony, since a bundle silently missing one sibling reads as complete
-   and is not. The code string is held for the one `packRecoveryCode` call and
-   never returned.
+9. **An export establishes the backup credential before it reads the Space
+   list.** `exportBundle` runs the ceremony in one order: establish the
+   credential through the host's own establishment port, then list the Spaces,
+   then export each in the order listed, then pack. The establishment writes the
+   credential's own unlock Space, so reading the list second is what makes the
+   bundle self-sufficient. The credential a reader unpacks opens a Space that
+   bundle carries. A list naming no account Space refuses before any export
+   runs, and a Space export that fails fails the whole ceremony, since a bundle
+   silently missing one sibling reads as complete and is not. The secret bytes
+   are held for the one `packBackupCredential` call, zeroed in place as soon as
+   it returns, and never returned; the host hands over a copy if it needs them.
 10. **The walk refuses early or counts.** `BundleInvalidError`,
     `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
     raised before any row reaches a sink. Past that point every failure is a
@@ -149,9 +160,9 @@ The dependency direction inside this package is one way: `migrate/` reads
   party to that contract, as a consumer: `migrate/descriptorLog.ts` reads a
   descriptor out of an archived resource log, `migrate/generations.ts` unwraps
   its epoch secrets and opens rows through `createEdvDocCipher`, and
-  `bundle/recoveryCode.ts` seals the packed code under a one-epoch descriptor of
-  the same construction. A normative change there is a walk of that spec's
-  parties table and reaches this repo through it.
+  `bundle/backupCredential.ts` seals the packed credential under a one-epoch
+  descriptor of the same construction. A normative change there is a walk of
+  that spec's parties table and reaches this repo through it.
 - Encoding primitives (base64url and friends) come from `@scure/base`.
 - HTTP belongs to the host. Nothing here fetches: a bundle is bytes in, bytes
   out.
@@ -159,9 +170,9 @@ The dependency direction inside this package is one way: `migrate/` reads
 ## Glossary
 
 - **Bundle** -- the backup file a wallet exports: one tar holding a manifest, an
-  optional packed recovery code, and one per-Space archive per Space. Lives in
-  `src/bundle/`. Avoid: backup file, export file, archive (which means the inner
-  per-Space tar here).
+  optional packed backup credential, and one per-Space archive per Space. Lives
+  in `src/bundle/`. Avoid: backup file, export file, archive (which means the
+  inner per-Space tar here).
 - **Per-Space archive** -- the UBC v0.1 export tarball of a single Space, the
   dialect the WAS reference server writes. Carried verbatim inside a bundle as
   `spaces/<spaceId>.tar`. Reader and writer live in `@interop/space-archive`;
@@ -171,17 +182,21 @@ The dependency direction inside this package is one way: `migrate/` reads
   Space, the client annex Space, or the unlock Space. Carried as the `url`
   anchor of the archive's manifest `contents` entry, named by `BUNDLE_ROLE`.
   Avoid: space type, kind, category.
-- **Export ceremony** -- one run of `exportBundle`: a recovery code minted, the
-  account's Spaces listed and exported one at a time, and a bundle packed. The
-  package owns the order; the host owns the effects, handed in as ports. Lives
-  in `src/bundle/exportBundle.ts`. Avoid: backup run, export flow, dump.
-- **Packed recovery code** -- the bundle's `recovery-code.json`: the account's
-  recovery code either in the clear or sealed to an export passphrase. Lives in
-  `src/bundle/recoveryCode.ts`. Avoid: sealed code, wrapped code, code envelope.
+- **Export ceremony** -- one run of `exportBundle`: a backup credential
+  established, the account's Spaces listed and exported one at a time, and a
+  bundle packed. The package owns the order; the host owns the effects, handed
+  in as ports. Lives in `src/bundle/exportBundle.ts`. Avoid: backup run, export
+  flow, dump.
+- **Packed backup credential** -- the bundle's `backup-credential.json`: the 32
+  secret bytes of the backup credential (a standing unlock credential the wallet
+  establishes for the export), base64url without padding, either in the clear
+  (`form: 'plain'`) or sealed to an export passphrase (`form: 'sealed'`). Lives
+  in `src/bundle/backupCredential.ts`. Avoid: packed code, backup code, sealed
+  seed.
 - **Export passphrase** -- the passphrase a user types at export time to seal
-  the packed recovery code, and again at import time to open it. Distinct from
-  the wallet's own unlock passphrase, and derived under a fresh per-bundle salt
-  so the two never produce the same key. Avoid: backup password, export
+  the packed backup credential, and again at import time to open it. Distinct
+  from the wallet's own unlock passphrase, and derived under a fresh per-bundle
+  salt so the two never produce the same key. Avoid: backup password, export
   password.
 - **Byte source** -- anything the readers accept as input bytes: a `Uint8Array`,
   a web `ReadableStream`, or an async iterable of chunks. Defined in

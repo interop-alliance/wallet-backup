@@ -138,7 +138,7 @@ Rules:
 ## Parties to this contract
 
 This package owns two contracts: the outer bundle (its manifest, role anchors
-and packed recovery code) and the migration sink port with its report. Every
+and packed backup credential) and the migration sink port with its report. Every
 repo that implements or consumes either is listed below with the modules that
 speak it. **The maintenance rule: a change to either contract's shape is a walk
 of this table** -- for each row, resolve the impact as shipped (naming what
@@ -152,7 +152,7 @@ table.
 
 | Repo                         | Modules speaking the contract                                                                                                                                                                                | Item reference |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- |
-| portable-wallet-profile-spec | The normative bundle text: the manifest, role anchors and packed recovery code. The spec governs; this codec follows it.                                                                                     | PWP-2          |
+| portable-wallet-profile-spec | The normative bundle text: the manifest, role anchors and packed backup credential. The spec governs; this codec follows it.                                                                                 | PWP-2          |
 | wallet-backup (this repo)    | `src/bundle/` the outer bundle codec; `src/migrate/` the walk, the sink port and the report.                                                                                                                 |                |
 | freewallet                   | The sink over `StorageManager`'s import functions (one per migrated collection), and the Settings entry point that runs the walk and writes the import activity row from the report's `manifest` and counts. |                |
 | dcw (private)                | Its own sink over the mobile wallet's stores, against the same port and report shape.                                                                                                                        |                |

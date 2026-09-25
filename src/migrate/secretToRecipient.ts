@@ -3,41 +3,45 @@
  */
 /**
  * One old secret to the recipient identity the archived user key roster wraps
- * to. Three secrets reach the same shape: an unlock passphrase through the
- * keyring's Argon2id derivation and the standing client identity, a recovery
- * code through its own HKDF client derivation, and a packed code out of the
- * bundle itself (in the clear, or sealed to an export passphrase) which is
- * then a recovery code like any other.
+ * to. Three secrets reach the same shape. An unlock passphrase runs through
+ * the keyring's Argon2id derivation to the standing client identity. A
+ * recovery code typed by hand runs through its own HKDF client derivation.
+ * The backup credential the bundle itself packs (in the clear, or sealed to an
+ * export passphrase) is unpacked to its 32 secret bytes, which run through
+ * the backup credential's HKDF derivation to its standing client identity.
  *
  * Every derivation here belongs to `@interop/wallet-core`; this module
  * chooses between them and hands back the key-agreement key the roster lookup
- * matches on, plus the intermediate seed so the walk can wipe it when it ends.
+ * matches on, plus the passphrase's intermediate seed so the walk can wipe it
+ * when it ends.
  */
-import { deriveUnlockSeed, KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
-import { standingClientFromUnlockSeed } from '@interop/wallet-core/unlock/standingClient'
+import {
+  BACKUP_CREDENTIAL_KDF,
+  KEYRING_KDF
+} from '@interop/wallet-core/keyring/kdf'
 import { recoveryClientFromCode } from '@interop/wallet-core/recovery/recoveryCode'
 import { BundleInvalidError } from '../errors.js'
-import { unpackRecoveryCode } from '../bundle/recoveryCode.js'
-import { RECOVERY_CODE_FILE } from '../bundle/manifest.js'
+import { unpackBackupCredential } from '../bundle/backupCredential.js'
+import { BACKUP_CREDENTIAL_FILE } from '../bundle/manifest.js'
+import { standingAgentsFromSecret } from '../standingAgents.js'
+import type { StandingAgents } from '../standingAgents.js'
 
 /**
  * The old secret a migration is run with: the account's unlock passphrase, its
- * recovery code, or the recovery code the bundle itself carries -- plain, or
- * sealed under the export passphrase typed at export time.
+ * recovery code, or the backup credential the bundle itself carries -- plain,
+ * or sealed under the export passphrase typed at export time.
  */
 export type MigrationSecret =
   | { passphrase: string }
   | { recoveryCode: string }
-  | { packedCode: { exportPassphrase?: string } }
+  | { packedCredential: { exportPassphrase?: string } }
 
 /**
  * A reader's key-agreement key, as wallet-core's own client derivations hand
  * it back. Taken off one of those derivations rather than imported from the
  * key interface's package, which this package does not depend on directly.
  */
-export type RecipientKeyAgreementKey = Awaited<
-  ReturnType<typeof standingClientFromUnlockSeed>
->['agents']['keyAgreementKey']
+export type RecipientKeyAgreementKey = StandingAgents['keyAgreementKey']
 
 /**
  * The derived recipient: the key-agreement key whose id the roster's wraps are
@@ -50,23 +54,23 @@ export interface MigrationRecipient {
 }
 
 /**
- * Reads the bundle's `recovery-code.json` and opens it.
+ * Reads the bundle's `backup-credential.json` and opens it.
  * @param options {object}
  * @param options.files {Map<string, Uint8Array>}   the bundle's top-level files
  * @param [options.exportPassphrase] {string}   required for a sealed document
- * @returns {Promise<string>}   the recovery code
+ * @returns {Promise<Uint8Array>}   the credential's secret bytes
  */
-async function recoveryCodeFromBundle({
+async function backupCredentialFromBundle({
   files,
   exportPassphrase
 }: {
   files: Map<string, Uint8Array>
   exportPassphrase?: string
-}): Promise<string> {
-  const bytes = files.get(RECOVERY_CODE_FILE)
+}): Promise<Uint8Array> {
+  const bytes = files.get(BACKUP_CREDENTIAL_FILE)
   if (bytes === undefined) {
     throw new BundleInvalidError(
-      `The bundle carries no "${RECOVERY_CODE_FILE}" entry.`
+      `The bundle carries no "${BACKUP_CREDENTIAL_FILE}" entry.`
     )
   }
   let document: unknown
@@ -74,20 +78,25 @@ async function recoveryCodeFromBundle({
     document = JSON.parse(new TextDecoder().decode(bytes))
   } catch (err) {
     throw new BundleInvalidError(
-      `The bundle's "${RECOVERY_CODE_FILE}" is not valid JSON.`,
+      `The bundle's "${BACKUP_CREDENTIAL_FILE}" is not valid JSON.`,
       { cause: err }
     )
   }
-  return unpackRecoveryCode({ document, exportPassphrase })
+  return unpackBackupCredential({ document, exportPassphrase })
 }
 
 /**
  * Derives the roster recipient one migration secret stands for.
  *
+ * The packed credential's secret bytes and the unlock seed derived from them
+ * are wiped before this returns: the key-agreement key is derived from them
+ * already, and nothing past this point needs either. Only the passphrase's
+ * unlock seed is handed on, for the walk to wipe when it ends.
+ *
  * @param options {object}
  * @param options.secret {MigrationSecret}
  * @param options.files {Map<string, Uint8Array>}   the bundle's top-level
- *   files, read only by the packed-code secret
+ *   files, read only by the packed-credential secret
  * @returns {Promise<MigrationRecipient>}
  */
 export async function recipientFromSecret({
@@ -98,20 +107,28 @@ export async function recipientFromSecret({
   files: Map<string, Uint8Array>
 }): Promise<MigrationRecipient> {
   if ('passphrase' in secret) {
-    const unlockSeed = await deriveUnlockSeed({
+    const { agents, unlockSeed } = await standingAgentsFromSecret({
       secret: secret.passphrase,
       kdf: KEYRING_KDF
     })
-    const client = await standingClientFromUnlockSeed({ unlockSeed })
-    return { keyAgreementKey: client.agents.keyAgreementKey, unlockSeed }
+    return { keyAgreementKey: agents.keyAgreementKey, unlockSeed }
   }
-  const code =
-    'recoveryCode' in secret
-      ? secret.recoveryCode
-      : await recoveryCodeFromBundle({
-          files,
-          exportPassphrase: secret.packedCode.exportPassphrase
-        })
-  const client = await recoveryClientFromCode({ code })
-  return { keyAgreementKey: client.agents.keyAgreementKey }
+  if ('recoveryCode' in secret) {
+    const client = await recoveryClientFromCode({ code: secret.recoveryCode })
+    return { keyAgreementKey: client.agents.keyAgreementKey }
+  }
+  const credentialSecret = await backupCredentialFromBundle({
+    files,
+    exportPassphrase: secret.packedCredential.exportPassphrase
+  })
+  try {
+    const { agents, unlockSeed } = await standingAgentsFromSecret({
+      secret: credentialSecret,
+      kdf: BACKUP_CREDENTIAL_KDF
+    })
+    unlockSeed.fill(0)
+    return { keyAgreementKey: agents.keyAgreementKey }
+  } finally {
+    credentialSecret.fill(0)
+  }
 }
