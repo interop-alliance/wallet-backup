@@ -1,6 +1,6 @@
 # @interop/wallet-backup Changelog
 
-## 0.3.0 - TBD
+## 0.3.0 - 2026-09-25
 
 ### Changed
 

@@ -1,7 +1,7 @@
 {
   "name": "@interop/wallet-backup",
   "description": "Backup bundle codec and content-migration walk for portable wallets",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "build": "pnpm run clear && tsc",
