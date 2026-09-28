@@ -66,7 +66,13 @@ The dependency direction inside this package is one way: `migrate/` reads
    buffers nothing per collection but the small documents `archiveSurvey.ts`
    gathers (each governing log, each app collection's `generator`, metadata
    `custom`, and public-read policy, the chunk-directory names, and each
-   collection's row count).
+   collection's row count). The writer streams: `writeBundle` returns before its
+   Space entries are written, awaits the pack's drain between entries, and
+   collects at most three Space archives at once (a tar header carries the entry
+   size, so an archive is collected whole before its entry). A consumer that
+   stops reading stops the per-Space exports behind it. A cancel, a failed entry
+   or an abort stops the writer: no further collection starts, and one in flight
+   is released at its next chunk.
 4. **The codecs are isomorphic.** No module under `src/` imports `node:*`, and
    no public type names `Buffer`; bytes are `Uint8Array` and streams arrive as a
    `ByteSource` (`@interop/space-archive`'s type, re-exported here since
@@ -131,8 +137,11 @@ The dependency direction inside this package is one way: `migrate/` reads
    then export each in the order listed, then pack. The establishment writes the
    credential's own unlock Space, so reading the list second is what makes the
    bundle self-sufficient. The credential a reader unpacks opens a Space that
-   bundle carries. A list naming no account Space refuses before any export
-   runs, and a Space export that fails fails the whole ceremony, since a bundle
+   bundle carries. The bundle stream is handed back after the listing, and the
+   exports run as it is read. A failure from then on, including the host's
+   `settle` check once every archive is in hand, errors the stream before its
+   last entry. A list naming no account Space refuses before any export runs,
+   and a Space export that fails fails the whole ceremony, since a bundle
    silently missing one sibling reads as complete and is not. The secret bytes
    are held for the one `packBackupCredential` call, zeroed in place as soon as
    it returns, and never returned; the host hands over a copy if it needs them.

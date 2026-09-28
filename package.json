@@ -49,7 +49,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@interop/wallet-core": "^0.83.0",
-    "@interop/was-client": "^0.75.1",
+    "@interop/was-client": "^0.77.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",

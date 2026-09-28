@@ -183,23 +183,32 @@ stored.
 ```js
 import { exportBundle } from '@interop/wallet-backup'
 
-const pack = await exportBundle({
+const stream = await exportBundle({
   meta: { created, createdBy: { controller, client } },
   establishBackupCredential: () => wallet.establishBackupCredential(), // 32 bytes
   listSpaces: () => wallet.listSpaces(), // [{ spaceId, role }], roles from BUNDLE_ROLE
   exportSpace: ({ spaceId }) => server.exportSpace(spaceId),
+  settle: () => wallet.checkSpacesUnchanged(), // optional; a throw fails the bundle
   exportPassphrase, // optional; seals the packed credential when given
   onProgress({ stage, spaceId }) {
     ui.show(spaceId ? `${stage}: ${spaceId}` : stage)
   },
   signal: controller.signal
 })
-// pipe `pack` wherever the file goes
+await stream.pipeTo(file) // a WritableStream<Uint8Array>
 ```
 
-A Space export that fails fails the whole ceremony: the rejection names the
-Space and carries your error as `cause`. A Space list naming no account Space is
-refused with `AccountSpaceArchiveMissingError` before any export runs.
+The stream is handed back once the Spaces are listed, before any is exported.
+The Spaces are then exported as you read it, up to three at a time, so a file
+fills as the export runs and a reader that stops reading stops the exports.
+Cancelling the stream stops them too, and skips `settle`. Aborting `signal`
+errors the stream at any point before its last byte is read.
+
+A Space export that fails fails the whole ceremony: the stream errors with an
+error that names the Space and carries yours as `cause`. A throw from `settle`,
+which runs once every archive is in hand, errors the stream the same way. A
+Space list naming no account Space is refused with
+`AccountSpaceArchiveMissingError` before any export runs.
 
 ### Writing and reading a bundle
 
@@ -211,7 +220,7 @@ import {
   BUNDLE_ROLE
 } from '@interop/wallet-backup'
 
-const pack = await writeBundle({
+const stream = writeBundle({
   meta: { created, createdBy: { controller, client } },
   spaces: [{ spaceId, role: BUNDLE_ROLE.accountSpaceArchive, archive }],
   backupCredential: await packBackupCredential({ secret, exportPassphrase })

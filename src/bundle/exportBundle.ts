@@ -18,7 +18,8 @@
  *
  * A Space export that fails fails the whole ceremony. A bundle silently
  * missing one sibling Space reads as complete and is not, which is worse than
- * no bundle at all.
+ * no bundle at all. The Spaces are exported as the bundle streams out, so such
+ * a failure errors the returned stream rather than ending it early.
  *
  * The credential's secret bytes do not outlive the call. They are held for
  * the one `packBackupCredential` call and zeroed in place as soon as it
@@ -26,7 +27,6 @@
  * on a field. The host's buffer is the one zeroed, so a host that needs the
  * bytes past the export hands over a copy.
  */
-import * as tar from 'tar-stream'
 import { byteChunks } from '@interop/space-archive'
 import type { ByteSource } from '@interop/space-archive'
 import { BUNDLE_ROLE } from './manifest.js'
@@ -56,15 +56,20 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /**
- * Runs the export ceremony and hands back the packed bundle.
+ * Runs the export ceremony and hands back the bundle as a stream.
  *
  * The stages run in exactly this order: the backup credential is established
  * and its secret packed, the account's Spaces are listed, each listed Space is
- * exported in the order listed, and the bundle is packed. Each Space is
- * exported only when the packer reaches it, so one Space's archive is
- * collected at a time. The pack itself is another matter: `writeBundle`
- * finalizes it with no consumer attached, so the finished bundle sits in
- * memory until the caller drains it (WBU-5 makes the writer stream).
+ * exported in the order listed, and the bundle is packed. The stream is handed
+ * back once the Spaces are listed, before any is exported. The Space exports
+ * then run as the caller reads, a few Spaces ahead of the bytes read so far
+ * (see `writeBundle`), and a caller that stops reading stops the exports.
+ *
+ * A failure before the stream is handed back (the establishment, the listing,
+ * a list naming no account Space, an abort) rejects the call. A failure after
+ * it (a Space export, the `settle` check, an abort before the stream's last
+ * byte is read) errors the stream. A consumer that cancels the stream stops
+ * the exports, and `settle` and the `packing` stage do not run.
  *
  * @param options {object}
  * @param options.meta {BundleMeta}   the bundle's provenance
@@ -75,21 +80,28 @@ function throwIfAborted(signal?: AbortSignal): void {
  *   names, each with a {@link BUNDLE_ROLE} role; called only once the
  *   credential has been established
  * @param options.exportSpace {function}   the server's per-Space export
- *   primitive, answering one Space's archive bytes
+ *   primitive, answering one Space's archive bytes; up to three calls run at
+ *   once
+ * @param [options.settle] {function}   called once every Space's archive is
+ *   in hand, before the bundle's last entry is written; a throw fails the
+ *   bundle the way a failed Space export does, so a host can check that the
+ *   account still matches the list it gave
  * @param [options.exportPassphrase] {string}   seals the packed credential
  *   when given; without it the secret is packed in the clear
  * @param [options.onProgress] {function}   called at each stage with
  *   `{ stage, spaceId }`, the `spaceId` present on `exporting-space` alone
- * @param [options.signal] {AbortSignal}   checked between stages; the ceremony
- *   throws its `reason`
- * @returns {Promise<tar.Pack>}   the finalized tar-stream pack, for the host
- *   to pipe wherever the file goes
+ * @param [options.signal] {AbortSignal}   checked between stages before the
+ *   stream is handed back, and watched by the writer after; the ceremony
+ *   throws, or the stream errors with, its `reason`
+ * @returns {Promise<ReadableStream<Uint8Array>>}   the bundle's bytes, for the
+ *   host to pipe wherever the file goes
  */
 export async function exportBundle({
   meta,
   establishBackupCredential,
   listSpaces,
   exportSpace,
+  settle,
   exportPassphrase,
   onProgress,
   signal
@@ -101,10 +113,11 @@ export async function exportBundle({
     spaceId: string
     role: string
   }) => Promise<ByteSource>
+  settle?: () => Promise<void>
   exportPassphrase?: string
   onProgress?: (options: { stage: ExportStage; spaceId?: string }) => void
   signal?: AbortSignal
-}): Promise<tar.Pack> {
+}): Promise<ReadableStream<Uint8Array>> {
   throwIfAborted(signal)
   onProgress?.({ stage: 'establishing-credential' })
   const secret = await establishBackupCredential()
@@ -123,21 +136,19 @@ export async function exportBundle({
         'bundle nothing can be read out of.'
     )
   }
+  throwIfAborted(signal)
 
   /**
-   * Exports one Space when the packer reaches it, so the ceremony collects one
-   * archive at a time and a failure names the Space it happened on. The last
-   * Space's source reports the `packing` stage as it ends, since the packer
-   * writes the final entry once it has these bytes.
+   * Exports one Space when the writer reaches it, so the ceremony holds only
+   * the few archives the writer has in flight, and a failure names the Space
+   * it happened on.
    * @param space {{ spaceId: string, role: string }}
-   * @param last {boolean}
    * @returns {AsyncGenerator<Uint8Array>}
    */
-  async function* archiveOf(
-    space: { spaceId: string; role: string },
-    last: boolean
-  ): AsyncGenerator<Uint8Array> {
-    throwIfAborted(signal)
+  async function* archiveOf(space: {
+    spaceId: string
+    role: string
+  }): AsyncGenerator<Uint8Array> {
     onProgress?.({ stage: 'exporting-space', spaceId: space.spaceId })
     try {
       yield* byteChunks(await exportSpace(space))
@@ -146,18 +157,20 @@ export async function exportBundle({
         cause: err
       })
     }
-    if (last) {
-      onProgress?.({ stage: 'packing' })
-    }
   }
 
   return writeBundle({
     meta,
-    spaces: spaces.map((space, index) => ({
+    spaces: spaces.map(space => ({
       spaceId: space.spaceId,
       role: space.role,
-      archive: archiveOf(space, index === spaces.length - 1)
+      archive: archiveOf(space)
     })),
-    backupCredential
+    backupCredential,
+    async settle() {
+      await settle?.()
+      onProgress?.({ stage: 'packing' })
+    },
+    signal
   })
 }

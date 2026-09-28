@@ -41,10 +41,10 @@ importers:
         version: 10.0.1(eslint@10.11.0)
       '@interop/wallet-core':
         specifier: ^0.83.0
-        version: 0.83.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.1(@interop/jsonld-signatures@11.8.6))
+        version: 0.83.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.77.0(@interop/jsonld-signatures@11.8.6))
       '@interop/was-client':
-        specifier: ^0.75.1
-        version: 0.75.1(@interop/jsonld-signatures@11.8.6)
+        specifier: ^0.77.0
+        version: 0.77.0(@interop/jsonld-signatures@11.8.6)
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.63.0
@@ -292,8 +292,8 @@ packages:
     peerDependencies:
       '@interop/was-client': '>=0.75.0 <1.0.0'
 
-  '@interop/was-client@0.75.1':
-    resolution: {integrity: sha512-KYTnLLGueHgE5skHq9ivxzjLk5hCBwXWA2fFuOTgzC9sO4axlKQ32z8XysCifJpYKyaxOogfug2F6UfXu74WZw==}
+  '@interop/was-client@0.77.0':
+    resolution: {integrity: sha512-Mh57giNWQs9cb8cYq96I3JIsWRbIww6ZKM9iMQ8Mhb+mADZ1kvw3ipAuR8fL6wnmIK6XIyXHUSzEcyW0Y67lQg==}
     engines: {node: '>=24.0'}
 
   '@interop/x25519-key-agreement-key@5.4.1':
@@ -1573,7 +1573,7 @@ snapshots:
       '@interop/did-method-webvh': 5.11.1
       '@interop/storage-core': link:../storage-core
 
-  '@interop/wallet-core@0.83.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.1(@interop/jsonld-signatures@11.8.6))':
+  '@interop/wallet-core@0.83.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.77.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -1583,7 +1583,7 @@ snapshots:
       '@interop/ezcap': 7.5.0
       '@interop/social-core': 0.8.1
       '@interop/vh-resource-log': 0.5.4
-      '@interop/was-client': 0.75.1(@interop/jsonld-signatures@11.8.6)
+      '@interop/was-client': 0.77.0(@interop/jsonld-signatures@11.8.6)
       '@interop/x25519-key-agreement-key': 5.4.1
       '@noble/ciphers': 2.4.0
       '@noble/hashes': 2.4.0
@@ -1594,7 +1594,7 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-client@0.75.1(@interop/jsonld-signatures@11.8.6)':
+  '@interop/was-client@0.77.0(@interop/jsonld-signatures@11.8.6)':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0

@@ -17,7 +17,7 @@ import {
   BACKUP_CREDENTIAL_FILE,
   BUNDLE_ROLE
 } from '../../src/index.js'
-import type { Bundle, BundleMeta } from '../../src/index.js'
+import type { Bundle, BundleMeta, ByteSource } from '../../src/index.js'
 
 /**
  * The fixture Space's id, packed below into a minimal archive: this suite
@@ -55,12 +55,14 @@ const meta: BundleMeta = {
 }
 
 /**
- * Drains a tar-stream pack into its bytes.
+ * Drains a bundle stream, or a raw tar-stream pack, into its bytes.
  * @param pack {object}
  * @returns {Promise<Uint8Array>}
  */
-async function packedBytes(pack: unknown): Promise<Uint8Array> {
-  return collectBytes(pack as AsyncIterable<Uint8Array>)
+async function packedBytes(
+  pack: ReadableStream<Uint8Array> | tar.Pack
+): Promise<Uint8Array> {
+  return collectBytes(pack as ByteSource)
 }
 
 /**
@@ -73,7 +75,7 @@ async function writeFixtureBundle(
 ): Promise<Uint8Array> {
   const archive = await packFixtureArchive()
   return packedBytes(
-    await writeBundle({
+    writeBundle({
       meta,
       spaces: [
         {
@@ -160,7 +162,7 @@ async function* flaggedChunks({
 async function writeBundleWithLargeUnlockSpace(): Promise<Uint8Array> {
   const archive = await packFixtureArchive()
   return packedBytes(
-    await writeBundle({
+    writeBundle({
       meta,
       spaces: [
         {
@@ -250,6 +252,74 @@ describe('writeBundle and readBundle', () => {
   })
 })
 
+describe('writeBundle stopping', () => {
+  it('releases an archive source in flight when the consumer cancels', async () => {
+    let releaseChunk!: () => void
+    const chunkReady = new Promise<void>(resolve => {
+      releaseChunk = resolve
+    })
+    let released = false
+    let chunksAfterCancel = 0
+    let cancelled = false
+    async function* slowArchive(): AsyncGenerator<Uint8Array> {
+      try {
+        await chunkReady
+        for (let index = 0; index < 4; index++) {
+          if (cancelled) {
+            chunksAfterCancel++
+          }
+          yield new Uint8Array(512)
+        }
+      } finally {
+        released = true
+      }
+    }
+    const stream = writeBundle({
+      meta,
+      spaces: [
+        {
+          spaceId: FIXTURE_SPACE_ID,
+          role: BUNDLE_ROLE.accountSpaceArchive,
+          archive: slowArchive()
+        }
+      ]
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    cancelled = true
+    await stream.cancel()
+    releaseChunk()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(released).toBe(true)
+    expect(chunksAfterCancel).toBe(1)
+  })
+
+  it('skips settle once the writer has stopped', async () => {
+    const controller = new AbortController()
+    let settled = false
+    const stream = writeBundle({
+      meta,
+      spaces: [
+        {
+          spaceId: FIXTURE_SPACE_ID,
+          role: BUNDLE_ROLE.accountSpaceArchive,
+          archive: await packFixtureArchive()
+        }
+      ],
+      async settle() {
+        settled = true
+      },
+      signal: controller.signal
+    })
+    controller.abort(new Error('the user cancelled'))
+
+    const err = await collectBytes(stream).catch((err: unknown) => err)
+    expect((err as Error).message).toBe('the user cancelled')
+    expect(settled).toBe(false)
+  })
+})
+
 describe('bundle refusals', () => {
   it('refuses bytes that are not a tar', async () => {
     const bytes = new TextEncoder().encode('not a tar archive at all')
@@ -278,7 +348,7 @@ describe('bundle refusals', () => {
   it('refuses a bundle whose manifest names no account Space archive', async () => {
     const archive = await packFixtureArchive()
     const bytes = await packedBytes(
-      await writeBundle({
+      writeBundle({
         meta,
         spaces: [
           {

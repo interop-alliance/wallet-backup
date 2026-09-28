@@ -233,3 +233,53 @@ code, call the primitive per Space, assemble -- and the transport is a port, so
 the app decides how the file reaches it. `src/bundle/exportBundle.ts` holds it.
 The code string is never returned: it lives for the one `packRecoveryCode` call
 and is dropped when the ceremony ends.
+
+---
+
+### WBU-5: Stream `writeBundle` instead of buffering the whole bundle
+
+- status: done (2026-09-28)
+- priority: medium
+- labels: export, streaming
+
+Context: `writeBundle` collects every Space archive with `collectBytes`, writes
+each as a tar entry, and calls `pack.finalize()` before returning, with no
+consumer attached. Nothing reads the pack while it is written, so the finished
+bundle sits in the pack's own queue in memory, and a host that pipes it to a
+file sees the file appear only once the whole export has finished. A backup of
+an account with several large Spaces is therefore bounded by memory rather than
+by disk, and the user gets no progress from the save itself.
+`discovered-from: freewallet FW-530`.
+
+The writer should hand the pack (or a stream over it) back before the entries
+are written, and write each entry as the consumer drains: await the pack's drain
+signal between entries so backpressure reaches the per-Space export, and report
+a failure part way through by destroying the pack (`pack.destroy(err)`) so the
+consumer sees the error rather than a truncated tar. A Space archive still has
+to be collected before its own entry is written, since a tar header carries the
+entry size, so the bound drops from the whole bundle to one archive.
+
+The host halves matter for the acceptance: freewallet's save picker opens before
+the run today precisely because the bundle is buffered, and a streaming writer
+lets the picked file fill as the export proceeds.
+
+- acceptance:
+  - [x] `writeBundle` returns before its entries are written, and writes them as
+        the consumer drains
+  - [x] Backpressure reaches the per-Space export: an undrained consumer stops
+        the next Space from being exported
+  - [x] A per-Space failure destroys the pack, and the consumer sees that error
+  - [x] The bundle's bytes are unchanged (the byte-reproducibility test still
+        passes)
+  - [x] The three host-facing comments corrected for FW-530 (`exportBundle.ts`,
+        `writeBundle.ts`, freewallet's `backupExport.ts` and `saveStream.ts`)
+        are updated to the streaming behavior
+  - [x] `exportBundle` hands back a `ReadableStream<Uint8Array>` (or the package
+        exports the AsyncIterable-to-ReadableStream adapter), so a host neither
+        casts the pack's `unknown` chunks nor writes the adapter itself
+        (freewallet's `streamFromPack` is the copy to delete)
+  - [x] The writer bounds how many Space exports are in flight (a small fixed
+        number ahead of the entry being written) rather than one at a time, so
+        an account with many recovery codes is not strictly serial; the bound,
+        not the host, decides, since the host's per-Space callback cannot see
+        the consumer's backpressure

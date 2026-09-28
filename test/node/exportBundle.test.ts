@@ -55,12 +55,22 @@ async function packFixtureArchive(spaceId: string): Promise<Uint8Array> {
 }
 
 /**
- * Drains a tar-stream pack into its bytes.
- * @param pack {object}
+ * Drains a bundle stream into its bytes.
+ * @param stream {ReadableStream<Uint8Array>}
  * @returns {Promise<Uint8Array>}
  */
-async function packedBytes(pack: unknown): Promise<Uint8Array> {
-  return collectBytes(pack as AsyncIterable<Uint8Array>)
+async function packedBytes(
+  stream: ReadableStream<Uint8Array>
+): Promise<Uint8Array> {
+  return collectBytes(stream)
+}
+
+/**
+ * Lets pending promise callbacks and stream pulls run.
+ * @returns {Promise<void>}
+ */
+async function settleTasks(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 20))
 }
 
 /**
@@ -209,22 +219,175 @@ describe('exportBundle', () => {
 
   it('fails the whole ceremony when one Space export fails', async () => {
     const cause = new Error('the server refused')
-    const err = await raised(() =>
-      exportBundle({
-        meta,
-        establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
-        listSpaces: async () => accountSpaces,
-        async exportSpace({ spaceId }) {
-          if (spaceId === UNLOCK_SPACE_ID) {
-            throw cause
-          }
-          return packFixtureArchive(spaceId)
+    const stream = await exportBundle({
+      meta,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () => accountSpaces,
+      async exportSpace({ spaceId }) {
+        if (spaceId === UNLOCK_SPACE_ID) {
+          throw cause
         }
-      })
-    )
+        return packFixtureArchive(spaceId)
+      }
+    })
+    const err = await raised(() => packedBytes(stream))
 
     expect(err.message).toContain(UNLOCK_SPACE_ID)
     expect(err.cause).toBe(cause)
+  })
+
+  it('hands back the stream before any Space is exported', async () => {
+    let exports = 0
+    const stream = await exportBundle({
+      meta,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () => accountSpaces,
+      async exportSpace({ spaceId }) {
+        exports++
+        return packFixtureArchive(spaceId)
+      }
+    })
+    expect(exports).toBe(0)
+    await packedBytes(stream)
+    expect(exports).toBe(accountSpaces.length)
+  })
+
+  it('runs the settle check once every Space is exported, and fails the bundle when it throws', async () => {
+    const exported: string[] = []
+    const refusal = new Error('the account changed')
+    let exportedAtSettle: string[] = []
+    const stream = await exportBundle({
+      meta,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () => accountSpaces,
+      async exportSpace({ spaceId }) {
+        exported.push(spaceId)
+        return packFixtureArchive(spaceId)
+      },
+      async settle() {
+        exportedAtSettle = [...exported]
+        throw refusal
+      }
+    })
+
+    expect(await raised(() => packedBytes(stream))).toBe(refusal)
+    expect(exportedAtSettle).toEqual([ACCOUNT_SPACE_ID, UNLOCK_SPACE_ID])
+  })
+
+  it('stops exporting Spaces while the consumer does not read', async () => {
+    const spaceIds = Array.from({ length: 8 }, (_, index) => `zSpace${index}`)
+    const started: string[] = []
+    // Each archive is larger than the pack's queue, so an entry is not taken
+    // until the consumer reads.
+    const archive = new Uint8Array(256 * 1024).fill(7)
+    const stream = await exportBundle({
+      meta,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () =>
+        spaceIds.map((spaceId, index) => ({
+          spaceId,
+          role:
+            index === 0
+              ? BUNDLE_ROLE.accountSpaceArchive
+              : BUNDLE_ROLE.unlockSpaceArchive
+        })),
+      async exportSpace({ spaceId }) {
+        started.push(spaceId)
+        return archive
+      }
+    })
+
+    await settleTasks()
+    // A few exports run ahead of the entry being written, and no more.
+    expect(started).toEqual(spaceIds.slice(0, 3))
+
+    const reader = stream.getReader()
+    const chunks: Uint8Array[] = []
+    const first = await reader.read()
+    chunks.push(first.value!)
+    await settleTasks()
+    expect(started.length).toBeLessThan(spaceIds.length)
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      chunks.push(value)
+    }
+
+    const bundle = await readBundle(
+      (async function* () {
+        yield* chunks
+      })()
+    )
+    const walked: string[] = []
+    for await (const space of bundle.spaces) {
+      walked.push(space.spaceId)
+      const bytes = await space.bytes()
+      expect(Buffer.from(bytes).equals(Buffer.from(archive))).toBe(true)
+    }
+    expect(walked).toEqual(spaceIds)
+    expect(started).toEqual(spaceIds)
+  })
+
+  it('runs neither settle nor packing once the consumer cancels', async () => {
+    let releaseLast!: () => void
+    const lastExport = new Promise<void>(resolve => {
+      releaseLast = resolve
+    })
+    const stages: string[] = []
+    let settled = false
+    const stream = await exportBundle({
+      meta,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () => accountSpaces,
+      async exportSpace({ spaceId }) {
+        if (spaceId === UNLOCK_SPACE_ID) {
+          await lastExport
+        }
+        return packFixtureArchive(spaceId)
+      },
+      async settle() {
+        settled = true
+      },
+      onProgress({ stage }) {
+        stages.push(stage)
+      }
+    })
+
+    await settleTasks()
+    await stream.cancel()
+    releaseLast()
+    await settleTasks()
+
+    expect(settled).toBe(false)
+    expect(stages).not.toContain('packing')
+  })
+
+  it('errors the stream on an abort after every archive is in hand', async () => {
+    const controller = new AbortController()
+    const stream = await exportBundle({
+      meta,
+      signal: controller.signal,
+      establishBackupCredential: async () => CREDENTIAL_SECRET.slice(),
+      listSpaces: async () => accountSpaces,
+      exportSpace: async ({ spaceId }) => packFixtureArchive(spaceId)
+    })
+    const reader = stream.getReader()
+    await reader.read()
+    await settleTasks()
+
+    controller.abort(new Error('the user cancelled'))
+    const err = await raised(async () => {
+      for (;;) {
+        const { done } = await reader.read()
+        if (done) {
+          return
+        }
+      }
+    })
+
+    expect(err.message).toBe('the user cancelled')
   })
 
   it('refuses a Space list naming no account Space', async () => {

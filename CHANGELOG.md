@@ -39,6 +39,19 @@
 
 ### Changed
 
+- Breaking: `writeBundle` returns a `ReadableStream<Uint8Array>` (no longer a
+  `Promise<tar.Pack>`) and writes each entry as the consumer drains. At most
+  three Space archives are collected at once, and a failing archive source
+  errors the stream. The new optional `settle` hook runs once every archive is
+  in hand, and the new optional `signal` errors the stream on abort. A cancel,
+  failure or abort stops the writer and releases archives still being collected.
+- Breaking: `exportBundle` resolves to a `ReadableStream<Uint8Array>` once the
+  Spaces are listed, before any is exported. Up to three `exportSpace` calls run
+  at once. A Space export failure or an abort after that point errors the
+  stream, not the returned promise, until its last byte is read. The new
+  optional `settle` port runs once every archive is in hand, before the last
+  entry is written, and its throw errors the stream. The `packing` stage is
+  reported after `settle`. A cancelled stream runs neither. (WBU-5)
 - `MigrationSinkMethod` names the four standard methods only.
 - The `@interop/was-client` peer range is now `>=0.73.0 <1.0.0`, for the
   `CollectionGenerator` type.
