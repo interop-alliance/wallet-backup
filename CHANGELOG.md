@@ -1,5 +1,11 @@
 # @interop/wallet-backup Changelog
 
+## 0.4.2 - TBD
+
+### Fixed
+
+- Remove stray storage-core override.
+
 ## 0.4.1 - 2026-09-28
 
 ### Fixed

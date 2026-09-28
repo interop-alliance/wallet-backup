@@ -2,5 +2,3 @@ allowBuilds:
   core-js: false
 minimumReleaseAgeExclude:
   - '@interop/*'
-overrides:
-  '@interop/storage-core': link:../storage-core
