@@ -1,5 +1,11 @@
 # @interop/wallet-backup Changelog
 
+## 0.4.1 - TBD
+
+### Fixed
+
+- Update to latest wallet-core dep.
+
 ## 0.4.0 - 2026-09-28
 
 ### Added
