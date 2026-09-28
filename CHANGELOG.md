@@ -1,5 +1,11 @@
 # @interop/wallet-backup Changelog
 
+## 0.4.3 - TBD
+
+### Fixed
+
+- Regen the lockfile.
+
 ## 0.4.2 - 2026-09-28
 
 ### Fixed
