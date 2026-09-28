@@ -66,8 +66,10 @@ pnpm install
 
 `migrateBundle` reads a bundle's account Space archive, recovers the old user
 key from one old secret, decrypts each standard collection's rows, and pushes
-them one at a time at a sink you supply. It issues no HTTP request and holds no
-collection in memory; each sink call is awaited before the next row is
+them one at a time at a sink you supply. With the optional `appCollections`
+member, the sink also takes the app collections: every collection outside the
+wallet Space's own layout, encrypted or plaintext. It issues no HTTP request and
+holds no collection in memory; each sink call is awaited before the next row is
 decrypted.
 
 ```js
@@ -85,6 +87,28 @@ const sink = {
   },
   async importActivity({ row }) {
     return store.addActivity(row)
+  },
+  // Optional. Without it, app collections are counted in `notMigrated`.
+  appCollections: {
+    async ensureCollection({
+      collectionId,
+      encrypted,
+      isPublic,
+      generator,
+      indexSchema
+    }) {
+      await store.ensureCollection({
+        collectionId,
+        encrypted,
+        isPublic,
+        generator,
+        indexSchema
+      })
+    },
+    async importRow(options) {
+      // `row` for a JSON content type, `bytes` for any other
+      return store.putRow(options)
+    }
   }
 }
 
@@ -109,6 +133,33 @@ method that throws counts as a failed row and the walk carries on; ten
 consecutive failures end that collection (its report entry names the cause under
 `stoppedBy`) and the walk moves to the next. A throw named `QuotaExceededError`
 ends the whole walk, and `report.stoppedAt` names where.
+
+The walk order is contacts, contact history, credentials, then the app
+collections by id, then activity last. `ensureCollection` runs once per app
+collection before its first row is opened. `encrypted` is false only when the
+archived metadata file exists, parses, and declares no `encryption`, and the
+collection carries no governing collection log. An encrypted collection with no
+log stops under `CollectionLogUnreadableError` before `ensureCollection`. That
+includes one whose metadata file is missing or does not parse. `isPublic` is
+true when the archived collection policy is `PublicCanRead`, and absent
+otherwise. `generator` is the app the archived Collection Metadata object names,
+absent when it names none. `indexSchema` is the blinded-index schema an
+encrypted collection's archived metadata `custom` carries, opened with the
+recovered user key generations. It is absent when there is none, it declares no
+index, or it will not open, and the collection still migrates. `custom` is a
+plaintext collection's archived metadata `custom`, handed on as archived. An
+encrypted collection's `custom` is sealed to the old account's keys and is not
+handed on. A throw from `ensureCollection` stops that collection, with its name
+under `stoppedBy`, and no row of it is handed over. Any collection stopped
+before its first row, this way or for a missing log, counts its rows as
+`unopenable` under the stopping cause. A throw named `QuotaExceededError` ends
+the whole walk. `importRow` follows the rules above. It receives
+`{ collectionId, resourceId, contentType }` plus the row. An encrypted
+collection's row arrives decrypted as `row`, under `application/json`. A
+plaintext one's arrives as `row`, parsed, when its content type is
+`application/json` or an `application/...+json` type, and as raw `bytes`
+otherwise. Both keep their archived `resourceId`. `app-connections` is part of
+the wallet layout and is not migrated yet.
 
 The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 `{ packedCredential: { exportPassphrase } }`. The last reads the bundle's own

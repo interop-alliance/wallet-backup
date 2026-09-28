@@ -14,6 +14,11 @@
  * -- `@interop/wallet-core/space` for the wallet's own collections,
  * `@interop/social-core` for the contacts pair -- so a rename upstream reaches
  * the walk rather than drifting past a local copy.
+ *
+ * Beside the four standard collections, the walk carries app collections: the
+ * collections outside the wallet Space's own layout, which a connected app had
+ * the wallet provision. The sink opts into them through its optional
+ * `appCollections` member.
  */
 import {
   PRIVATE_CREDENTIALS_COLLECTION,
@@ -23,6 +28,7 @@ import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
+import type { CollectionGenerator, IndexSchema } from '@interop/was-client'
 
 /**
  * What one sink call did with the row it was handed. `skipped` is the merge
@@ -33,10 +39,48 @@ import {
 export type SinkOutcome = 'accepted' | 'skipped' | 'conflicting' | 'failed'
 
 /**
- * One import function per migrated collection. Each takes one decrypted row
- * and reports its outcome. A method that throws is a `failed` row whose cause
- * name the report keeps -- except a throw named `QuotaExceededError`, which
- * stops the whole walk.
+ * One app collection row as `importRow` receives it. `contentType` is the
+ * archived representation's content type, and an encrypted collection's
+ * decrypted row is always `application/json`. A JSON type, by storage-core's
+ * `isJsonContentType` (`application/json` or an `application/...+json` type),
+ * arrives parsed as `row`; any other arrives as the archived `bytes`, unparsed.
+ */
+export type AppCollectionRow = {
+  collectionId: string
+  resourceId: string
+  contentType: string
+} & ({ row: unknown } | { bytes: Uint8Array })
+
+/**
+ * One import function per migrated standard collection. Each takes one
+ * decrypted row and reports its outcome. A method that throws is a `failed`
+ * row whose cause name the report keeps -- except a throw named
+ * `QuotaExceededError`, which stops the whole walk.
+ *
+ * `appCollections` is optional. A sink that carries it migrates app
+ * collections too. `ensureCollection` is called once per app collection,
+ * before its first row is opened. `encrypted` says whether the collection is
+ * client-side encrypted, so the host creates the same kind: its archived
+ * Collection Metadata declares `encryption`, or it carries a governing
+ * collection log. An encrypted collection with no log is stopped before
+ * `ensureCollection` under `CollectionLogUnreadableError`.
+ * `isPublic` is `true` when the archived collection policy is `PublicCanRead`,
+ * and absent otherwise.
+ * `generator` is the one its archived Collection Metadata object names, absent
+ * when that file names none or does not parse. `indexSchema` is the
+ * blinded-index schema sealed in an encrypted collection's archived metadata
+ * `custom`, absent when there is none, it declares no index, or no held
+ * generation opens it. `custom` is a plaintext collection's archived metadata
+ * `custom` value, handed on as archived. It is absent for an encrypted
+ * collection, whose `custom` is sealed to the old account's keys, and when the
+ * metadata carries none. A throw from it stops that
+ * collection, and a throw named `QuotaExceededError` stops the whole walk.
+ * `importRow` follows the same outcome and throw rules as the four standard
+ * methods. An encrypted collection's row arrives decrypted; a plaintext one's
+ * arrives parsed as JSON or as raw bytes, by its content type (see
+ * `AppCollectionRow`). Either way it keeps its archived `resourceId`. A sink
+ * without the member leaves every app collection's rows counted in
+ * `notMigrated`.
  */
 export interface MigrationSink {
   importCredential(options: {
@@ -59,18 +103,30 @@ export interface MigrationSink {
     resourceId: string
     row: unknown
   }): Promise<SinkOutcome>
+  appCollections?: {
+    ensureCollection(options: {
+      collectionId: string
+      encrypted: boolean
+      isPublic?: boolean
+      generator?: CollectionGenerator
+      indexSchema?: IndexSchema
+      custom?: unknown
+    }): Promise<void>
+    importRow(options: AppCollectionRow): Promise<SinkOutcome>
+  }
 }
 
 /**
- * The name of the sink method each migrated collection's rows go to.
+ * The name of the sink method each migrated standard collection's rows go to.
  */
-export type MigrationSinkMethod = keyof MigrationSink
+export type MigrationSinkMethod = Exclude<keyof MigrationSink, 'appCollections'>
 
 /**
- * The migrated collections in walk order: contacts before their history (so a
- * revision's head is already in place), then credentials, then activity last
- * -- the host writes its own import activity row after the walk, and running
- * activity last keeps the counts it carries final.
+ * The migrated standard collections in walk order: contacts before their
+ * history (so a revision's head is already in place), then credentials, then
+ * activity last -- the host writes its own import activity row after the walk,
+ * and running activity last keeps the counts it carries final. The app
+ * collections walk between credentials and activity, by id.
  */
 export const MIGRATION_WALK_ORDER: ReadonlyArray<{
   collectionId: string

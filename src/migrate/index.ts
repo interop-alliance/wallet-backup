@@ -20,7 +20,12 @@ export {
   MIGRATION_WALK_ORDER,
   WALK_STOPPING_ERROR_NAME
 } from './sink.js'
-export type { MigrationSink, MigrationSinkMethod, SinkOutcome } from './sink.js'
+export type {
+  AppCollectionRow,
+  MigrationSink,
+  MigrationSinkMethod,
+  SinkOutcome
+} from './sink.js'
 
 export type { MigrationCollectionReport, MigrationReport } from './report.js'
 

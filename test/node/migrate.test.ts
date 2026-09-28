@@ -32,7 +32,13 @@ import {
   EPOCH_CONFIGURATION_STATE_TYPE
 } from '@interop/was-client/edv/core'
 import type { RecipientPublicKey } from '@interop/was-client/edv/core'
-import { collectBytes, packSpaceArchive } from '@interop/space-archive'
+import type { IndexSchema } from '@interop/was-client'
+import type { ArchiveFile } from '@interop/space-archive'
+import {
+  collectBytes,
+  fileNameFor,
+  packSpaceArchive
+} from '@interop/space-archive'
 import {
   migrateBundle,
   packBackupCredential,
@@ -40,6 +46,9 @@ import {
   BUNDLE_ROLE
 } from '../../src/index.js'
 import type {
+  AppCollectionRow,
+  MigrationCollectionReport,
+  MigrationReport,
   MigrationSecret,
   MigrationSink,
   SinkOutcome
@@ -55,6 +64,8 @@ import {
   keyMapDir,
   logBody,
   mintGenerations,
+  plaintextRows,
+  sealedCustom,
   recipientFor,
   rosterDescriptor,
   FIXTURE_META,
@@ -71,6 +82,27 @@ interface FixtureCollection {
   openedBy: Generation[][]
   log?: 'wrapped' | 'broken' | 'omit'
   chunked?: string[]
+  /** rows written as plain JSON under `row-<n>` ids, with no collection log */
+  plaintext?: boolean
+  /** the Collection Metadata file's body */
+  metadata?: unknown
+  /** leaves the Collection Metadata file out, or writes it as non-JSON bytes */
+  metadataFile?: 'omit' | 'broken'
+  /** further files written verbatim into the collection directory */
+  extraFiles?: Array<{ name: string; bytes: Uint8Array }>
+  /** the generations the descriptor's blinded-index key is wrapped to */
+  hmacFor?: Generation[]
+  /**
+   * an index schema sealed into the metadata `custom` by `by`, bound to
+   * `boundTo` (the collection's own id by default), under the first epoch
+   * when `underFirstEpoch` is set and the current one otherwise
+   */
+  sealedIndexSchema?: {
+    schema: IndexSchema
+    by: Generation
+    boundTo?: string
+    underFirstEpoch?: boolean
+  }
 }
 
 /**
@@ -84,6 +116,46 @@ async function recoverySecret(): Promise<{
   const code = generateRecoveryCode()
   const client = await recoveryClientFromCode({ code })
   return { code, recipient: recipientFor(client.agents.keyAgreementKey) }
+}
+
+/**
+ * A per-collection report tally: all counts zero, with the given overrides.
+ * @param [overrides] {Partial<MigrationCollectionReport>}
+ * @returns {MigrationCollectionReport}
+ */
+function tally(
+  overrides: Partial<MigrationCollectionReport> = {}
+): MigrationCollectionReport {
+  return {
+    accepted: 0,
+    skipped: 0,
+    conflicting: 0,
+    failed: 0,
+    unopenable: 0,
+    ...overrides
+  }
+}
+
+/**
+ * A verbatim collection file with UTF-8 text content.
+ * @param name {string}
+ * @param text {string}
+ * @returns {{ name: string, bytes: Uint8Array }}
+ */
+function textFile(
+  name: string,
+  text: string
+): { name: string; bytes: Uint8Array } {
+  return { name, bytes: new TextEncoder().encode(text) }
+}
+
+/**
+ * A collection policy file with the given body text.
+ * @param body {string}
+ * @returns {{ name: string, bytes: Uint8Array }}
+ */
+function policyFile(body: string): { name: string; bytes: Uint8Array } {
+  return textFile('.collection.policy.json', body)
 }
 
 /**
@@ -127,28 +199,59 @@ async function fixtureBundle({
     keyMapDir(logBody(roster))
   ]
   for (const collection of collections) {
-    const encryption = await collectionDescriptor({
-      openedBy: collection.openedBy
-    })
-    const files = await encryptRows({
-      collectionId: collection.collectionId,
-      encryption,
-      rows: collection.rows
-    })
-    const log = collection.log ?? 'wrapped'
+    let metadata = collection.metadata
+    let leadingFiles: ArchiveFile[]
+    if (collection.plaintext === true) {
+      leadingFiles = plaintextRows(collection.rows)
+    } else {
+      const encryption = await collectionDescriptor({
+        openedBy: collection.openedBy,
+        ...(collection.hmacFor !== undefined && { hmacFor: collection.hmacFor })
+      })
+      if (collection.sealedIndexSchema !== undefined) {
+        const { schema, by, boundTo, underFirstEpoch } =
+          collection.sealedIndexSchema
+        const sealingEncryption =
+          underFirstEpoch === true
+            ? { ...encryption, currentEpoch: encryption.epochs![0]!.id }
+            : encryption
+        metadata = {
+          id: collection.collectionId,
+          custom: await sealedCustom({
+            collectionId: boundTo ?? collection.collectionId,
+            encryption: sealingEncryption,
+            generation: by,
+            indexSchema: schema
+          })
+        }
+      }
+      const log = collection.log ?? 'wrapped'
+      leadingFiles = [
+        ...(log === 'omit'
+          ? []
+          : [
+              collectionLogFile({
+                collectionId: collection.collectionId,
+                body: log === 'broken' ? 'not a log' : logBody(encryption)
+              })
+            ]),
+        ...(await encryptRows({
+          collectionId: collection.collectionId,
+          encryption,
+          rows: collection.rows
+        }))
+      ]
+    }
     entries.push(
       collectionDir({
         collectionId: collection.collectionId,
+        metadata,
+        ...(collection.metadataFile !== undefined && {
+          metadataFile: collection.metadataFile
+        }),
         files: [
-          ...(log === 'omit'
-            ? []
-            : [
-                collectionLogFile({
-                  collectionId: collection.collectionId,
-                  body: log === 'broken' ? 'not a log' : logBody(encryption)
-                })
-              ]),
-          ...files,
+          ...leadingFiles,
+          ...(collection.extraFiles ?? []),
           ...(collection.chunked ?? []).map(chunkDir)
         ]
       })
@@ -213,6 +316,96 @@ function recordingSink(
     importContactRevision: record,
     importActivity: record
   }
+}
+
+/**
+ * A recording sink that also migrates app collections. `events` lists every
+ * `ensure:<id>` and `row:<id>` call in order, `ensured` keeps each
+ * `ensureCollection` argument, and `appRows` keeps each `importRow` argument.
+ *
+ * @param [options] {object}
+ * @param [options.answer] {function}   as {@link recordingSink} takes it
+ * @param [options.ensure] {function}   runs inside `ensureCollection`, and may
+ *   throw
+ * @returns {object}
+ */
+function appRecordingSink({
+  answer,
+  ensure
+}: {
+  answer?: (options: {
+    collectionId: string
+    index: number
+    row: unknown
+  }) => SinkOutcome
+  ensure?: (collectionId: string) => void
+} = {}) {
+  const sink = recordingSink(answer)
+  const events: string[] = []
+  const ensured: Array<
+    Parameters<
+      NonNullable<MigrationSink['appCollections']>['ensureCollection']
+    >[0]
+  > = []
+  const appRows: AppCollectionRow[] = []
+  return {
+    ...sink,
+    events,
+    ensured,
+    appRows,
+    appCollections: {
+      async ensureCollection(options: (typeof ensured)[number]): Promise<void> {
+        events.push(`ensure:${options.collectionId}`)
+        ensured.push(options)
+        ensure?.(options.collectionId)
+      },
+      async importRow(options: AppCollectionRow): Promise<SinkOutcome> {
+        events.push(`row:${options.collectionId}`)
+        appRows.push(options)
+        const { collectionId, resourceId } = options
+        const row = 'row' in options ? options.row : options.bytes
+        return sink.importContact({ collectionId, resourceId, row })
+      }
+    }
+  }
+}
+
+/**
+ * Mints generations, builds a bundle from the collections they open, and
+ * migrates it into an app-collections sink with a recovery code.
+ *
+ * @param options {object}
+ * @param options.collections {function}   builds the fixture collections from
+ *   the minted generations, oldest first
+ * @param [options.generationCount] {number}   1 by default
+ * @param [options.sink] {ReturnType<typeof appRecordingSink>}
+ * @returns {Promise<{ sink: ReturnType<typeof appRecordingSink>, report: MigrationReport }>}
+ */
+async function runApp({
+  collections,
+  generationCount = 1,
+  sink = appRecordingSink()
+}: {
+  collections: (generations: Generation[]) => FixtureCollection[]
+  generationCount?: number
+  sink?: ReturnType<typeof appRecordingSink>
+}): Promise<{
+  sink: ReturnType<typeof appRecordingSink>
+  report: MigrationReport
+}> {
+  const generations = await mintGenerations(generationCount)
+  const { code, recipient } = await recoverySecret()
+  const bundle = await fixtureBundle({
+    generations,
+    recipients: [recipient],
+    collections: collections(generations)
+  })
+  const report = await migrateBundle({
+    bundle,
+    secret: { recoveryCode: code },
+    sink
+  })
+  return { sink, report }
 }
 
 /**
@@ -691,6 +884,8 @@ describe('migrateBundle', () => {
     })
     expect(report.collections[CONTACTS_COLLECTION]).toMatchObject({
       accepted: 0,
+      unopenable: 1,
+      unopenableCauses: { CollectionLogUnreadableError: 1 },
       stoppedBy: 'CollectionLogUnreadableError'
     })
     expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]!.accepted).toBe(1)
@@ -918,6 +1113,562 @@ describe('migrateBundle', () => {
     expect(report.collections[CONTACTS_COLLECTION]).toMatchObject({
       accepted: 1,
       unopenable: 0
+    })
+  })
+  describe('app collections', () => {
+    const generator = {
+      id: 'did:key:z6MkApp',
+      origin: 'https://app.example',
+      url: 'https://app.example/',
+      name: 'Example App'
+    }
+
+    it('migrates an encrypted app collection, ensuring it with its generator before any row', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          {
+            collectionId: 'notes',
+            rows: [{ note: 'one' }, { note: 'two' }],
+            openedBy: [[generation!]],
+            metadata: {
+              id: 'notes',
+              generator,
+              _generation: 'g-1',
+              _version: 4
+            }
+          }
+        ]
+      })
+      expect(sink.events).toEqual(['ensure:notes', 'row:notes', 'row:notes'])
+      expect(sink.ensured).toEqual([
+        { collectionId: 'notes', encrypted: true, generator }
+      ])
+      expect(sink.calls.map(call => call.row)).toEqual(
+        expect.arrayContaining([{ note: 'one' }, { note: 'two' }])
+      )
+      expect(sink.appRows.map(row => row.contentType)).toEqual([
+        'application/json',
+        'application/json'
+      ])
+      expect(report.collections['notes']).toEqual(tally({ accepted: 2 }))
+      expect(report.notMigrated['notes']).toBeUndefined()
+    })
+
+    it('migrates a public plaintext app collection with its archived resource ids', async () => {
+      const { sink, report } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'public-posts',
+            rows: [{ post: 'hello' }],
+            openedBy: [],
+            plaintext: true,
+            chunked: ['video.bin'],
+            metadata: { id: 'public-posts', generator },
+            extraFiles: [
+              textFile('r.broken.application%2Fjson.json', 'not json'),
+              policyFile(JSON.stringify({ type: 'PublicCanRead' }))
+            ]
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        {
+          collectionId: 'public-posts',
+          encrypted: false,
+          isPublic: true,
+          generator
+        }
+      ])
+      expect(sink.appRows).toEqual([
+        {
+          collectionId: 'public-posts',
+          resourceId: 'row-0',
+          contentType: 'application/json',
+          row: { post: 'hello' }
+        }
+      ])
+      expect(report.collections['public-posts']).toEqual(
+        tally({
+          accepted: 1,
+          unopenable: 2,
+          unopenableCauses: {
+            ChunkedResourceUnsupportedError: 1,
+            SyntaxError: 1
+          }
+        })
+      )
+      expect(report.notMigrated['public-posts']).toBeUndefined()
+    })
+
+    it('hands a plaintext non-JSON resource on as its bytes, and parses any +json type', async () => {
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+      const { sink, report } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'public-posts',
+            rows: [],
+            openedBy: [],
+            plaintext: true,
+            extraFiles: [
+              {
+                name: fileNameFor({
+                  resourceId: 'logo',
+                  contentType: 'image/png'
+                }),
+                bytes: png
+              },
+              textFile(
+                fileNameFor({
+                  resourceId: 'answer',
+                  contentType: 'text/plain'
+                }),
+                '42'
+              ),
+              textFile(
+                fileNameFor({
+                  resourceId: 'profile',
+                  contentType: 'application/ld+json'
+                }),
+                '{"name":"x"}'
+              )
+            ]
+          }
+        ]
+      })
+      const byId = new Map(sink.appRows.map(row => [row.resourceId, row]))
+      expect(byId.get('logo')).toEqual({
+        collectionId: 'public-posts',
+        resourceId: 'logo',
+        contentType: 'image/png',
+        bytes: png
+      })
+      expect(byId.get('answer')).toEqual({
+        collectionId: 'public-posts',
+        resourceId: 'answer',
+        contentType: 'text/plain',
+        bytes: new TextEncoder().encode('42')
+      })
+      expect(byId.get('profile')).toEqual({
+        collectionId: 'public-posts',
+        resourceId: 'profile',
+        contentType: 'application/ld+json',
+        row: { name: 'x' }
+      })
+      expect(report.collections['public-posts']).toMatchObject({
+        accepted: 3,
+        unopenable: 0
+      })
+    })
+
+    it('refuses an app collection whose metadata declares encryption but whose log is missing', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          {
+            collectionId: 'notes',
+            rows: [{ note: 'one' }],
+            openedBy: [[generation!]],
+            log: 'omit',
+            metadata: {
+              id: 'notes',
+              encryption: { scheme: 'edv', version: EDV_SCHEME_VERSION }
+            }
+          }
+        ]
+      })
+      expect(sink.events).toEqual([])
+      expect(report.collections['notes']).toEqual(
+        tally({
+          unopenable: 1,
+          unopenableCauses: { CollectionLogUnreadableError: 1 },
+          stoppedBy: 'CollectionLogUnreadableError'
+        })
+      )
+    })
+
+    it('refuses a log-less app collection whose metadata does not parse', async () => {
+      const { sink, report } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'posts',
+            rows: [{ post: 'a' }],
+            openedBy: [],
+            plaintext: true,
+            metadataFile: 'broken'
+          }
+        ]
+      })
+      expect(sink.events).toEqual([])
+      expect(sink.ensured).toEqual([])
+      expect(report.collections['posts']).toEqual(
+        tally({
+          unopenable: 1,
+          unopenableCauses: { CollectionLogUnreadableError: 1 },
+          stoppedBy: 'CollectionLogUnreadableError'
+        })
+      )
+    })
+
+    it('refuses a log-less app collection with no metadata file', async () => {
+      const { sink, report } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'posts',
+            rows: [{ post: 'a' }],
+            openedBy: [],
+            plaintext: true,
+            metadataFile: 'omit'
+          }
+        ]
+      })
+      expect(sink.events).toEqual([])
+      expect(sink.ensured).toEqual([])
+      expect(report.collections['posts']).toEqual(
+        tally({
+          unopenable: 1,
+          unopenableCauses: { CollectionLogUnreadableError: 1 },
+          stoppedBy: 'CollectionLogUnreadableError'
+        })
+      )
+    })
+
+    it('migrates a log-less app collection as plaintext when its metadata declares no encryption', async () => {
+      const { sink, report } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'posts',
+            rows: [{ post: 'a' }],
+            openedBy: [],
+            plaintext: true,
+            metadata: { id: 'posts', custom: { theme: 'dark' } }
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        { collectionId: 'posts', encrypted: false, custom: { theme: 'dark' } }
+      ])
+      expect(sink.appRows).toEqual([
+        {
+          collectionId: 'posts',
+          resourceId: 'row-0',
+          contentType: 'application/json',
+          row: { post: 'a' }
+        }
+      ])
+      expect(report.collections['posts']).toEqual(tally({ accepted: 1 }))
+    })
+
+    it('ensures no further app collection after an abort between collections', async () => {
+      const generations = await mintGenerations(1)
+      const { code, recipient } = await recoverySecret()
+      const bundle = await fixtureBundle({
+        generations,
+        recipients: [recipient],
+        // app-a's row is the archive's last entry, so walkCollection finds no
+        // entry after it to check the signal on.
+        collections: [
+          {
+            collectionId: 'app-b',
+            rows: [{ post: 'b' }],
+            openedBy: [],
+            plaintext: true
+          },
+          {
+            collectionId: 'app-a',
+            rows: [{ post: 'a' }],
+            openedBy: [],
+            plaintext: true
+          }
+        ]
+      })
+      const controller = new AbortController()
+      const reason = new Error('the user cancelled the import')
+      const sink = appRecordingSink({
+        answer: ({ collectionId }) => {
+          // The abort lands with app-a's last row.
+          if (collectionId === 'app-a') {
+            controller.abort(reason)
+          }
+          return 'accepted'
+        }
+      })
+      await expect(
+        migrateBundle({
+          bundle,
+          secret: { recoveryCode: code },
+          sink,
+          signal: controller.signal
+        })
+      ).rejects.toBe(reason)
+      expect(sink.events).toEqual(['ensure:app-a', 'row:app-a'])
+    })
+
+    it('hands no isPublic when the collection policy grants no public read', async () => {
+      const { sink } = await runApp({
+        collections: () => [
+          {
+            collectionId: 'plain-a',
+            rows: [{ post: 'a' }],
+            openedBy: [],
+            plaintext: true
+          },
+          {
+            collectionId: 'plain-b',
+            rows: [{ post: 'b' }],
+            openedBy: [],
+            plaintext: true,
+            extraFiles: [policyFile(JSON.stringify({ type: 'SomethingElse' }))]
+          },
+          {
+            collectionId: 'plain-c',
+            rows: [{ post: 'c' }],
+            openedBy: [],
+            plaintext: true,
+            extraFiles: [policyFile('not json')]
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        { collectionId: 'plain-a', encrypted: false },
+        { collectionId: 'plain-b', encrypted: false },
+        { collectionId: 'plain-c', encrypted: false }
+      ])
+    })
+
+    it('hands no generator when the Collection Metadata names none or does not parse', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          {
+            collectionId: 'app-a',
+            rows: [{ note: 'a' }],
+            openedBy: [[generation!]]
+          },
+          {
+            collectionId: 'app-b',
+            rows: [{ note: 'b' }],
+            openedBy: [[generation!]],
+            metadata: 'not an object'
+          },
+          {
+            collectionId: 'app-c',
+            rows: [{ note: 'c' }],
+            openedBy: [[generation!]],
+            metadata: { id: 'app-c', generator: { origin: 'no id' } }
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        { collectionId: 'app-a', encrypted: true },
+        { collectionId: 'app-b', encrypted: true },
+        { collectionId: 'app-c', encrypted: true }
+      ])
+      expect(report.collections['app-b']!.accepted).toBe(1)
+    })
+
+    const indexSchema: IndexSchema = {
+      revision: 1,
+      indexes: [{ attribute: 'content.type', addedIn: 1 }]
+    }
+
+    it('hands the sealed index schema to ensureCollection, falling back to an older generation', async () => {
+      const { sink, report } = await runApp({
+        generationCount: 2,
+        collections: ([older, newer]) => [
+          {
+            collectionId: 'notes',
+            rows: [{ note: 'one' }],
+            // The schema was sealed under the first epoch, which the newest
+            // generation cannot unwrap, so the older one opens it.
+            openedBy: [[older!], [older!, newer!]],
+            hmacFor: [older!, newer!],
+            sealedIndexSchema: {
+              schema: indexSchema,
+              by: older!,
+              underFirstEpoch: true
+            }
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        { collectionId: 'notes', encrypted: true, indexSchema }
+      ])
+      expect(report.collections['notes']!.accepted).toBe(1)
+    })
+
+    it('hands no index schema when the sealed custom will not open, and migrates the rows', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          {
+            collectionId: 'notes',
+            rows: [{ note: 'one' }],
+            openedBy: [[generation!]],
+            hmacFor: [generation!],
+            // Sealed for another collection, so the id binding refuses it.
+            sealedIndexSchema: {
+              schema: indexSchema,
+              by: generation!,
+              boundTo: 'elsewhere'
+            }
+          },
+          {
+            collectionId: 'plain-custom',
+            rows: [{ note: 'two' }],
+            openedBy: [[generation!]],
+            hmacFor: [generation!],
+            metadata: { id: 'plain-custom', custom: { not: 'an envelope' } }
+          },
+          {
+            collectionId: 'no-custom',
+            rows: [{ note: 'three' }],
+            openedBy: [[generation!]],
+            hmacFor: [generation!]
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([
+        { collectionId: 'no-custom', encrypted: true },
+        { collectionId: 'notes', encrypted: true },
+        { collectionId: 'plain-custom', encrypted: true }
+      ])
+      expect(report.collections['notes']!.accepted).toBe(1)
+      expect(report.collections['plain-custom']!.accepted).toBe(1)
+      expect(report.collections['no-custom']!.accepted).toBe(1)
+    })
+
+    it('walks the app collections by id after credentials, with activity last', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          ...standardCollections(generation!),
+          {
+            collectionId: 'zeta',
+            rows: [{ note: 'z' }],
+            openedBy: [],
+            plaintext: true
+          },
+          {
+            collectionId: 'alpha',
+            rows: [{ note: 'a' }],
+            openedBy: [[generation!]]
+          }
+        ]
+      })
+      const walkOrder = [
+        CONTACTS_COLLECTION,
+        CONTACTS_HISTORY_COLLECTION,
+        PRIVATE_CREDENTIALS_COLLECTION,
+        'alpha',
+        'zeta',
+        WALLET_ACTIVITY_COLLECTION
+      ]
+      expect(sink.calls.map(call => call.collectionId)).toEqual(walkOrder)
+      expect(Object.keys(report.collections)).toEqual(walkOrder)
+    })
+
+    it('counts app collections as not migrated when the sink carries no appCollections', async () => {
+      const [generation] = await mintGenerations(1)
+      const { code, recipient } = await recoverySecret()
+      const bundle = await fixtureBundle({
+        generations: [generation!],
+        recipients: [recipient],
+        collections: [
+          {
+            collectionId: 'notes',
+            rows: [{ note: 'one' }, { note: 'two' }],
+            openedBy: [[generation!]]
+          },
+          {
+            collectionId: 'public-posts',
+            rows: [{ post: 'hello' }],
+            openedBy: [],
+            plaintext: true
+          }
+        ]
+      })
+      const sink = recordingSink()
+      const report = await migrateBundle({
+        bundle,
+        secret: { recoveryCode: code },
+        sink
+      })
+      expect(sink.calls).toHaveLength(0)
+      expect(report.notMigrated['notes']).toBe(2)
+      expect(report.notMigrated['public-posts']).toBe(1)
+      expect(report.collections['notes']).toBeUndefined()
+    })
+
+    it('leaves app-connections unmigrated with an app-collections sink', async () => {
+      const { sink, report } = await runApp({
+        collections: ([generation]) => [
+          {
+            collectionId: APP_CONNECTIONS_COLLECTION,
+            rows: [{ app: 'one' }],
+            openedBy: [[generation!]]
+          }
+        ]
+      })
+      expect(sink.events).toEqual([])
+      expect(report.notMigrated[APP_CONNECTIONS_COLLECTION]).toBe(1)
+    })
+
+    it('stops just the app collection whose ensureCollection throws', async () => {
+      const { sink, report } = await runApp({
+        sink: appRecordingSink({
+          ensure: collectionId => {
+            if (collectionId === 'app-a') {
+              const err = new Error('the collection could not be created')
+              err.name = 'CollectionCreateError'
+              throw err
+            }
+          }
+        }),
+        collections: ([generation]) => [
+          {
+            collectionId: 'app-a',
+            rows: [{ note: 'a' }],
+            openedBy: [[generation!]]
+          },
+          {
+            collectionId: 'app-b',
+            rows: [{ note: 'b' }],
+            openedBy: [[generation!]]
+          }
+        ]
+      })
+      expect(sink.events).toEqual(['ensure:app-a', 'ensure:app-b', 'row:app-b'])
+      expect(report.collections['app-a']).toEqual(
+        tally({
+          unopenable: 1,
+          unopenableCauses: { CollectionCreateError: 1 },
+          stoppedBy: 'CollectionCreateError'
+        })
+      )
+      expect(report.collections['app-b']!.accepted).toBe(1)
+      expect(report.stoppedAt).toBeUndefined()
+    })
+
+    it('stops the whole walk on a quota refusal from ensureCollection', async () => {
+      const { report } = await runApp({
+        sink: appRecordingSink({
+          ensure: () => {
+            const err = new Error('507')
+            err.name = 'QuotaExceededError'
+            throw err
+          }
+        }),
+        collections: ([generation]) => [
+          ...standardCollections(generation!),
+          {
+            collectionId: 'app-a',
+            rows: [{ note: 'a' }],
+            openedBy: [[generation!]]
+          }
+        ]
+      })
+      expect(report.stoppedAt).toEqual({
+        collectionId: 'app-a',
+        cause: 'QuotaExceededError'
+      })
+      expect(report.collections['app-a']!.stoppedBy).toBe('QuotaExceededError')
+      expect(report.collections[WALLET_ACTIVITY_COLLECTION]).toBeUndefined()
     })
   })
 })

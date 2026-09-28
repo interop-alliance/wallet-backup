@@ -14,11 +14,15 @@
  *
  * Generations arrive oldest first and are reversed here, because the newest is
  * the one most rows open under and every fallback costs a failed unwrap.
+ *
+ * The same ciphers also open an encrypted collection's archived metadata
+ * `custom` envelope, for the blinded-index schema it carries.
  */
 import { userKeyVaultKeys } from '@interop/wallet-core/keys/userKey'
 import { unwrapUserKeyGenerations } from '@interop/wallet-core/keys/userKeyGenerations'
 import { createEdvDocCipher } from '@interop/was-client/edv/core'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { EdvDocCipher } from '@interop/was-client/edv/core'
+import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
 import { BundleRecipientMissingError } from '../errors.js'
 import type { RecipientKeyAgreementKey } from './secretToRecipient.js'
 
@@ -76,7 +80,7 @@ export async function recoverGenerations({
  * @param options.collectionId {string}
  * @param options.encryption {CollectionEncryption}   the collection's
  *   descriptor, read from its archived governing log
- * @returns {Promise<Array<{ decrypt: (options: { id: string, envelope: never }) => Promise<unknown> }>>}
+ * @returns {Promise<EdvDocCipher[]>}
  */
 export async function ciphersForCollection({
   generations,
@@ -86,12 +90,8 @@ export async function ciphersForCollection({
   generations: UserKeyGeneration[]
   collectionId: string
   encryption: CollectionEncryption
-}): Promise<
-  Array<{
-    decrypt: (options: { id: string; envelope: never }) => Promise<unknown>
-  }>
-> {
-  const ciphers = []
+}): Promise<EdvDocCipher[]> {
+  const ciphers: EdvDocCipher[] = []
   for (const generation of generations) {
     const { keyAgreementKey, keyResolver } = userKeyVaultKeys({
       userKey: generation
@@ -114,6 +114,46 @@ export async function ciphersForCollection({
     }
   }
   return ciphers
+}
+
+/**
+ * Recovers the blinded-index schema from a collection's archived metadata
+ * `custom` envelope, newest generation first. A generation whose cipher holds
+ * no blinding key, or cannot unwrap the envelope's epoch, yields to the next.
+ * The envelope is bound to the collection id the ciphers were built for, so
+ * one sealed for another collection is not opened.
+ *
+ * A schema that cannot be recovered refuses nothing: the answer is then
+ * `undefined`, as it is for a schema that declares no index. Nothing about the
+ * failure is logged, since the envelope's contents are secret.
+ *
+ * @param options {object}
+ * @param options.ciphers {EdvDocCipher[]}   newest generation first
+ * @param options.custom {unknown}   the archived metadata's `custom` value
+ * @returns {Promise<IndexSchema | undefined>}
+ */
+export async function indexSchemaFromCustom({
+  ciphers,
+  custom
+}: {
+  ciphers: EdvDocCipher[]
+  custom: unknown
+}): Promise<IndexSchema | undefined> {
+  for (const cipher of ciphers) {
+    let schema: IndexSchema
+    try {
+      schema = await cipher.applyMeta({ custom })
+    } catch (err) {
+      if ((err as Error).name === 'KeyUnwrapError') {
+        continue
+      }
+      return undefined
+    }
+    if (schema.indexes.length > 0) {
+      return schema
+    }
+  }
+  return undefined
 }
 
 /**

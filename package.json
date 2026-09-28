@@ -38,8 +38,9 @@
   "sideEffects": false,
   "dependencies": {
     "@interop/social-core": "^0.8.1",
-    "@interop/space-archive": "^0.2.0",
-    "@interop/vh-resource-log": "^0.5.3",
+    "@interop/space-archive": "^0.4.1",
+    "@interop/storage-core": "^0.21.0",
+    "@interop/vh-resource-log": "^0.5.4",
     "@scure/base": "^2.4.0",
     "events": "^3.3.0",
     "tar-stream": "^3.2.0",
@@ -47,8 +48,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/wallet-core": "^0.80.0",
-    "@interop/was-client": "^0.71.0",
+    "@interop/wallet-core": "^0.83.0",
+    "@interop/was-client": "^0.75.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",
@@ -64,7 +65,7 @@
   },
   "peerDependencies": {
     "@interop/wallet-core": ">=0.80.0 <1.0.0",
-    "@interop/was-client": ">=0.70.0 <1.0.0"
+    "@interop/was-client": ">=0.73.0 <1.0.0"
   },
   "publishConfig": {
     "access": "public",

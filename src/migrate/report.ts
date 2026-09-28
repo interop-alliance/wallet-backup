@@ -16,11 +16,13 @@ import type { SinkOutcome } from './sink.js'
 
 /**
  * One collection's counts. `unopenable` rows never reached the sink: no held
- * user key generation opened them, or the Resource is chunked.
+ * user key generation opened them, the Resource is chunked, or the collection
+ * was stopped before its first row (its `stoppedBy` then names the cause).
  * `unopenableCauses` names why, by error name, with the number of rows each
  * name accounts for. `stoppedBy` is present only when a run of consecutive
  * failures ended the collection, carrying the last cause's name (or the
- * outcome word `failed` when the sink reported failure without throwing).
+ * outcome word `failed` when the sink reported failure without throwing), or
+ * when the collection was stopped before its first row.
  */
 export interface MigrationCollectionReport {
   accepted: number

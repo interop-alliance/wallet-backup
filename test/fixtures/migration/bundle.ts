@@ -16,14 +16,19 @@
 import {
   createEdvEncryptOnlyDocCipher,
   mintEpoch,
+  mintHmacKey,
   ownerRecipient,
   toEpochConfigurationState,
   wrapEpochSecret,
   EDV_SCHEME_VERSION
 } from '@interop/was-client/edv/core'
 import type { RecipientPublicKey } from '@interop/was-client/edv/core'
-import type { CollectionEncryption } from '@interop/was-client'
-import { mintUserKey } from '@interop/wallet-core/keys/userKey'
+import { createEdvEncryption } from '@interop/was-client/edv'
+import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
+import {
+  mintUserKey,
+  userKeyVaultKeys
+} from '@interop/wallet-core/keys/userKey'
 import { userKeyAsRecipient } from '@interop/wallet-core/keys/userKeyGenerations'
 import {
   KEY_MAP_COLLECTION,
@@ -140,12 +145,16 @@ export async function rosterDescriptor({
  * @param options {object}
  * @param options.openedBy {Generation[][]}   one entry per epoch, oldest
  *   first, each naming the generations that may open it
+ * @param [options.hmacFor] {Generation[]}   when given, the descriptor
+ *   declares a blinded-index key wrapped to these generations
  * @returns {Promise<CollectionEncryption>}
  */
 export async function collectionDescriptor({
-  openedBy
+  openedBy,
+  hmacFor
 }: {
   openedBy: Generation[][]
+  hmacFor?: Generation[]
 }): Promise<CollectionEncryption> {
   const epochs = []
   for (const readers of openedBy) {
@@ -162,12 +171,71 @@ export async function collectionDescriptor({
       )
     })
   }
-  return {
+  const descriptor: CollectionEncryption = {
     scheme: 'edv',
     version: EDV_SCHEME_VERSION,
     currentEpoch: epochs[epochs.length - 1]!.id,
     epochs
   }
+  if (hmacFor !== undefined) {
+    const hmac = await mintHmacKey()
+    descriptor.hmac = {
+      id: hmac.id,
+      type: hmac.type,
+      recipients: await Promise.all(
+        hmacFor.map(userKey =>
+          wrapEpochSecret({
+            epochSecret: hmac.secret,
+            recipient: userKeyAsRecipient({ userKey })
+          })
+        )
+      )
+    }
+  }
+  return descriptor
+}
+
+/**
+ * Seals a collection's metadata `custom` carrying an index schema, the way a
+ * Collection handle persists it: an envelope under the collection's current
+ * epoch, bound to the collection id.
+ *
+ * @param options {object}
+ * @param options.collectionId {string}
+ * @param options.encryption {CollectionEncryption}   carrying an `hmac` key
+ * @param options.generation {Generation}   a generation that opens the current
+ *   epoch and the blinding key
+ * @param options.indexSchema {IndexSchema}
+ * @returns {Promise<unknown>}   the sealed `custom` value
+ */
+export async function sealedCustom({
+  collectionId,
+  encryption,
+  generation,
+  indexSchema
+}: {
+  collectionId: string
+  encryption: CollectionEncryption
+  generation: Generation
+  indexSchema: IndexSchema
+}): Promise<unknown> {
+  const provider = createEdvEncryption({
+    resolveKeys: async () => userKeyVaultKeys({ userKey: generation })
+  })
+  const codec = await provider.codecFor({
+    spaceId: FIXTURE_SPACE_ID,
+    collectionId,
+    scheme: 'edv',
+    encryption
+  })
+  if (!codec) {
+    throw new Error('expected an EDV codec')
+  }
+  const { custom } = await codec.encodeMeta({
+    custom: { indexSchema },
+    slot: { kind: 'collection' }
+  })
+  return custom
 }
 
 /**
@@ -262,25 +330,54 @@ export async function encryptRows({
  * @param options.collectionId {string}
  * @param options.files {ArchiveEntry[]}   the collection's own files, after
  *   its Metadata dot-file
+ * @param [options.metadata] {unknown}   the Collection Metadata file's body;
+ *   `{ id }` by default
+ * @param [options.metadataFile] {'omit' | 'broken'}   leaves the Collection
+ *   Metadata file out, or writes it as bytes that are not JSON
  * @returns {ArchiveEntry}
  */
 export function collectionDir({
   collectionId,
-  files
+  files,
+  metadata,
+  metadataFile
 }: {
   collectionId: string
   files: ArchiveEntry[]
+  metadata?: unknown
+  metadataFile?: 'omit' | 'broken'
 }): ArchiveEntry {
+  const name = `.collection.${collectionId}.json`
+  const metadataFiles: ArchiveFile[] = []
+  if (metadataFile === 'broken') {
+    metadataFiles.push({ name, bytes: new TextEncoder().encode('not json') })
+  } else if (metadataFile !== 'omit') {
+    metadataFiles.push(
+      jsonFile({ name, document: metadata ?? { id: collectionId } })
+    )
+  }
   return {
     name: collectionId,
-    files: [
-      jsonFile({
-        name: `.collection.${collectionId}.json`,
-        document: { id: collectionId }
-      }),
-      ...files
-    ]
+    files: [...metadataFiles, ...files]
   }
+}
+
+/**
+ * A plaintext collection's rows, one JSON file each, under the resource ids
+ * `row-0`, `row-1`, and so on.
+ * @param rows {unknown[]}
+ * @returns {ArchiveFile[]}
+ */
+export function plaintextRows(rows: unknown[]): ArchiveFile[] {
+  return rows.map((row, index) =>
+    jsonFile({
+      name: fileNameFor({
+        resourceId: `row-${index}`,
+        contentType: 'application/json'
+      }),
+      document: row
+    })
+  )
 }
 
 /**

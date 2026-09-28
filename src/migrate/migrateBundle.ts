@@ -26,11 +26,14 @@
  * overwrite in place; those are dropped here and reclaimed by garbage
  * collection rather than wiped.
  */
+import { WALLET_ACTIVITY_COLLECTION } from '@interop/wallet-core/space/collections'
+import type { EdvDocCipher } from '@interop/was-client/edv/core'
 import { accountSpaceArchive, readBundle } from '../bundle/readBundle.js'
 import { bundleManifestSummary } from '../bundle/manifest.js'
 import { BundleInvalidError, CollectionLogUnreadableError } from '../errors.js'
 import type { ByteSource } from '@interop/space-archive'
 import { surveyArchive } from './archiveSurvey.js'
+import type { AppCollectionSurvey } from './archiveSurvey.js'
 import { walkCollection } from './collectionWalk.js'
 import {
   descriptorFromCollectionLogFile,
@@ -38,6 +41,7 @@ import {
 } from './descriptorLog.js'
 import {
   ciphersForCollection,
+  indexSchemaFromCustom,
   recoverGenerations,
   zeroGenerations
 } from './generations.js'
@@ -46,8 +50,72 @@ import { CollectionTally, keyedRecord } from './report.js'
 import type { MigrationCollectionReport, MigrationReport } from './report.js'
 import { recipientFromSecret } from './secretToRecipient.js'
 import type { MigrationSecret } from './secretToRecipient.js'
-import { MIGRATION_WALK_ORDER } from './sink.js'
-import type { MigrationSink, SinkOutcome } from './sink.js'
+import { MIGRATION_WALK_ORDER, WALK_STOPPING_ERROR_NAME } from './sink.js'
+import type { AppCollectionRow, MigrationSink, SinkOutcome } from './sink.js'
+
+/**
+ * One collection the walk enters, and where its rows go. `app` is present for
+ * an app collection and carries its survey and the sink's `ensureCollection`.
+ */
+type WalkStep = {
+  collectionId: string
+  importRow: (options: AppCollectionRow) => Promise<SinkOutcome>
+  app?: AppCollectionSurvey & {
+    ensureCollection: NonNullable<
+      MigrationSink['appCollections']
+    >['ensureCollection']
+  }
+}
+
+/**
+ * The walk's steps in order: the standard collections, with the app
+ * collections, by id, just before activity, which stays last.
+ *
+ * @param options {object}
+ * @param options.sink {MigrationSink}
+ * @param options.appCollections {Map<string, AppCollectionSurvey>}   sorted
+ *   by id
+ * @returns {WalkStep[]}
+ */
+function walkSteps({
+  sink,
+  appCollections
+}: {
+  sink: MigrationSink
+  appCollections: Map<string, AppCollectionSurvey>
+}): WalkStep[] {
+  const appSteps: WalkStep[] = []
+  const appSink = sink.appCollections
+  if (appSink !== undefined) {
+    for (const [collectionId, app] of appCollections) {
+      appSteps.push({
+        collectionId,
+        importRow: options => appSink.importRow(options),
+        app: {
+          ...app,
+          ensureCollection: options => appSink.ensureCollection(options)
+        }
+      })
+    }
+  }
+  const steps: WalkStep[] = []
+  for (const { collectionId, method } of MIGRATION_WALK_ORDER) {
+    if (collectionId === WALLET_ACTIVITY_COLLECTION) {
+      steps.push(...appSteps)
+    }
+    steps.push({
+      collectionId,
+      // A standard collection is encrypted, so its rows always arrive parsed.
+      importRow: ({ resourceId, ...body }) =>
+        sink[method]({
+          collectionId,
+          resourceId,
+          row: 'row' in body ? body.row : body.bytes
+        })
+    })
+  }
+  return steps
+}
 
 /**
  * Migrates a backup bundle's content into a host's stores.
@@ -58,8 +126,8 @@ import type { MigrationSink, SinkOutcome } from './sink.js'
  * @param options.secret {MigrationSecret}   the old account's unlock
  *   passphrase, its recovery code, or the backup credential the bundle carries
  * @param options.sink {MigrationSink}   the host's import functions
- * @param [options.signal] {AbortSignal}   checked between rows; the walk
- *   throws its `reason`
+ * @param [options.signal] {AbortSignal}   checked between rows and before
+ *   each collection is entered; the walk throws its `reason`
  * @param [options.onProgress] {function}   called once per row with
  *   `{ collectionId, index, outcome }`
  * @returns {Promise<MigrationReport>}
@@ -95,7 +163,11 @@ export async function migrateBundle({
   const migrated = new Set(
     MIGRATION_WALK_ORDER.map(entry => entry.collectionId)
   )
-  const survey = await surveyArchive({ archive, migrated })
+  const survey = await surveyArchive({
+    archive,
+    migrated,
+    migratesAppCollections: sink.appCollections !== undefined
+  })
   if (survey.rosterLog === undefined) {
     throw new BundleInvalidError(
       'The account Space archive carries no user key roster resource, so no ' +
@@ -132,44 +204,83 @@ export async function migrateBundle({
       keyAgreementKey: recipient.keyAgreementKey
     })
 
-    for (const { collectionId, method } of MIGRATION_WALK_ORDER) {
-      if (!survey.present.has(collectionId)) {
+    const steps = walkSteps({ sink, appCollections: survey.appCollections })
+    for (const { collectionId, importRow, app } of steps) {
+      // An abort between collections ends the walk here, before the next
+      // collection is entered or made on the host.
+      if (signal?.aborted) {
+        throw signal.reason
+      }
+      if (app === undefined && !survey.present.has(collectionId)) {
         // A collection the archive does not carry was never entered, so it is
         // absent from the report rather than present with zeroes.
         continue
       }
       const tally = new CollectionTally()
       const logBytes = survey.collectionLogs.get(collectionId)
-      let ciphers
+      // A standard collection is always encrypted. An app collection is unless
+      // its metadata parsed with no `encryption` and it has no governing log.
+      const encrypted = app?.encrypted ?? true
+      let ciphers: EdvDocCipher[] | undefined
       try {
-        if (logBytes === undefined) {
+        if (logBytes !== undefined) {
+          ciphers = await ciphersForCollection({
+            generations,
+            collectionId,
+            encryption: descriptorFromCollectionLogFile({
+              bytes: logBytes,
+              collectionId
+            })
+          })
+        } else if (encrypted) {
           throw new CollectionLogUnreadableError(
             `The archived collection "${collectionId}" carries no governing ` +
               'history log, so its encryption descriptor is unknown.'
           )
         }
-        ciphers = await ciphersForCollection({
-          generations,
-          collectionId,
-          encryption: descriptorFromCollectionLogFile({
-            bytes: logBytes,
-            collectionId
+        if (app !== undefined) {
+          // An encrypted collection's blinded-index schema travels sealed in
+          // its metadata `custom`; one that will not open is not handed on.
+          const indexSchema =
+            ciphers !== undefined && app.custom !== undefined
+              ? await indexSchemaFromCustom({ ciphers, custom: app.custom })
+              : undefined
+          await app.ensureCollection({
+            collectionId,
+            encrypted,
+            ...(app.isPublic && { isPublic: true }),
+            ...(app.generator !== undefined && { generator: app.generator }),
+            ...(indexSchema !== undefined && { indexSchema }),
+            // A plaintext collection's `custom` is handed on as archived. An
+            // encrypted one's is sealed to the old account's keys.
+            ...(!encrypted &&
+              app.custom !== undefined && { custom: app.custom })
           })
-        })
+        }
       } catch (err) {
         // Rows have already reached the sink by now, so nothing here may end
         // the walk without a report. An unreadable log is the expected cause;
-        // any other (a descriptor body no cipher can be built from) is named
-        // as it came.
-        tally.stoppedBy = (err as Error).name
+        // any other (a descriptor body no cipher can be built from, a host
+        // that could not make the collection) is named as it came.
+        // No row of this collection is handed over, so each is counted as
+        // unopenable under the cause rather than dropped from the report.
+        const cause = (err as Error).name
+        tally.stoppedBy = cause
+        const rows = survey.walkedRows.get(collectionId) ?? 0
+        for (let index = 0; index < rows; index++) {
+          tally.countUnopenable(cause)
+        }
         collections.set(collectionId, tally.toReport())
+        if (cause === WALK_STOPPING_ERROR_NAME) {
+          stoppedAt = { collectionId, cause }
+          break
+        }
         continue
       }
       const { stopped } = await walkCollection({
         archive,
         collectionId,
-        method,
-        sink,
+        importRow,
         ciphers,
         chunked: survey.chunked.get(collectionId) ?? new Set(),
         tally,

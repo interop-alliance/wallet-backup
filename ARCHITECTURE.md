@@ -32,8 +32,8 @@ src/migrate/index.ts              The migration walk's door
 src/migrate/migrateBundle.ts      `migrateBundle`: bundle + secret + sink to a report
 src/migrate/secretToRecipient.ts  One old secret to the roster recipient it stands for
 src/migrate/descriptorLog.ts      An archived governing log to its encryption descriptor
-src/migrate/generations.ts        The user key generations, and a cipher per generation
-src/migrate/archiveSurvey.ts      One pass gathering the logs, chunk dirs, and row counts
+src/migrate/generations.ts        The user key generations, a cipher per generation, the index schema
+src/migrate/archiveSurvey.ts      One pass gathering the logs, chunk dirs, generators, and row counts
 src/migrate/collectionWalk.ts     One collection's rows, one at a time, to the sink
 src/migrate/report.ts             The report shape and the per-collection tally
 src/migrate/sink.ts               The sink port, the walk order, and the walk's two limits
@@ -64,7 +64,9 @@ The dependency direction inside this package is one way: `migrate/` reads
    reads an entry's bytes before advancing. The migration walk holds one row on
    top of that: it awaits each sink call before it reads the next entry, and it
    buffers nothing per collection but the small documents `archiveSurvey.ts`
-   gathers (each governing log and the chunk-directory names).
+   gathers (each governing log, each app collection's `generator`, metadata
+   `custom`, and public-read policy, the chunk-directory names, and each
+   collection's row count).
 4. **The codecs are isomorphic.** No module under `src/` imports `node:*`, and
    no public type names `Buffer`; bytes are `Uint8Array` and streams arrive as a
    `ByteSource` (`@interop/space-archive`'s type, re-exported here since
@@ -138,8 +140,9 @@ The dependency direction inside this package is one way: `migrate/` reads
     `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
     raised before any row reaches a sink. Past that point every failure is a
     number in the report -- an unreadable collection log, a row no generation
-    opens, a write that did not land -- except a sink throw named
-    `QuotaExceededError`, which ends the walk and is named in `stoppedAt`.
+    opens, an app collection the host could not ensure, a write that did not
+    land -- except a sink throw named `QuotaExceededError`, which ends the walk
+    and is named in `stoppedAt`.
 
 ## Ownership heuristics
 
@@ -206,10 +209,18 @@ The dependency direction inside this package is one way: `migrate/` reads
 - **Migration** -- one run of `migrateBundle`: a bundle and one old secret in,
   decrypted rows pushed at a sink, a report out. Lives in `src/migrate/`. Avoid:
   import, restore, recovery (which is the recovery code's word here).
+- **App collection** -- a collection in the account Space archive outside the
+  wallet Space's own layout (`WALLET_SPACE_PROVISION_ROSTER`). It is plaintext
+  only when its archived metadata file exists, parses, and declares no
+  `encryption`, and it carries no governing collection log. Otherwise it is
+  encrypted. A connected app had the wallet provision it. The walk migrates it
+  only through the sink's optional `appCollections` member, between credentials
+  and activity, by id. Avoid: third-party collection, custom collection.
 - **Sink** -- the host's side of the migration: one import function per migrated
-  collection, each taking one decrypted row and answering `accepted`, `skipped`,
-  `conflicting` or `failed`. The only wallet-specific code the walk touches, and
-  the reason this package knows no wallet row types. See
+  standard collection, plus an optional `appCollections` pair, each taking one
+  decrypted row and answering `accepted`, `skipped`, `conflicting` or `failed`.
+  The only wallet-specific code the walk touches, and the reason this package
+  knows no wallet row types. See
   `decisions/0001-the-walk-lives-here-behind-a-push-sink.md`. Avoid: writer,
   handler, callback, consumer.
 - **Generation** -- one epoch of the account's user key, recovered from the
@@ -224,4 +235,7 @@ The dependency direction inside this package is one way: `migrate/` reads
 
 ## Current State labels
 
-None. Every `@interop/*` dependency is consumed from the npm registry.
+- Transitional: `@interop/space-archive` is consumed through a local
+  `link:../space-archive` reference until its 0.3.0 release, which carries
+  `collectionMetadataFromFile`. Every other `@interop/*` dependency is consumed
+  from the npm registry.

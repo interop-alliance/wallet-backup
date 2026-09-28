@@ -1,5 +1,51 @@
 # @interop/wallet-backup Changelog
 
+## 0.4.0 - TBD
+
+### Added
+
+- The migration walk migrates app collections: every collection in the account
+  Space archive outside the wallet Space's layout
+  (`WALLET_SPACE_PROVISION_ROSTER` from
+  `@interop/wallet-core/space/collections`). A collection is plaintext only when
+  its archived metadata file exists, parses, and declares no `encryption`, and
+  it carries no governing collection log. Any other collection is encrypted and
+  its rows are decrypted. An encrypted one with no log, including one whose
+  metadata file is missing or does not parse, stops under
+  `CollectionLogUnreadableError` before `ensureCollection`. A plaintext
+  collection's JSON rows (`application/json` or an `application/...+json` type)
+  are parsed; a body that does not parse counts as `unopenable` under
+  `SyntaxError`. Rows of any other content type are handed on as raw bytes.
+- `MigrationSink.appCollections`, optional:
+  `{ ensureCollection({ collectionId, encrypted, isPublic?, generator?, indexSchema?, custom? }), importRow({ collectionId, resourceId, contentType, row | bytes }) }`
+  (`AppCollectionRow`). A decrypted row carries `application/json`.
+  `ensureCollection` runs once per app collection before its first row is
+  opened. `generator` is the one the archived Collection Metadata object names.
+  `isPublic` is `true` when the archived collection policy is `PublicCanRead`,
+  and absent otherwise. `indexSchema` is the blinded-index schema sealed in an
+  encrypted collection's archived metadata `custom`, opened newest generation
+  first. It is absent when there is none, it declares no index, or no generation
+  opens it, and that refuses nothing. `custom` is a plaintext collection's
+  archived metadata `custom`, handed on as archived. A throw from
+  `ensureCollection` stops that collection (`stoppedBy`); a `QuotaExceededError`
+  stops the walk. `importRow` follows the standard methods' outcome and throw
+  rules. A sink without the member leaves app collections in `notMigrated`.
+- A collection stopped before its first row counts each of its rows as
+  `unopenable` under the stopping cause.
+- An abort that lands between collections ends the walk before the next
+  collection is entered, so `ensureCollection` does not run for it.
+- The walk order is contacts, contact history, credentials, the app collections
+  by id, then activity. `app-connections` stays unmigrated.
+
+### Changed
+
+- `MigrationSinkMethod` names the four standard methods only.
+- The `@interop/was-client` peer range is now `>=0.73.0 <1.0.0`, for the
+  `CollectionGenerator` type.
+- Depends on `@interop/storage-core` 0.21.0, for `isJsonContentType`.
+- Depends on `@interop/space-archive` 0.4.0, for `collectionMetadataFromFile`,
+  `collectionGeneratorFromMetadata` and `policyFromFile`.
+
 ## 0.3.0 - 2026-09-25
 
 ### Changed
