@@ -15,8 +15,8 @@ importers:
         specifier: ^0.4.1
         version: 0.4.1
       '@interop/storage-core':
-        specifier: ^0.21.0
-        version: 0.21.0
+        specifier: ^0.22.0
+        version: 0.22.0
       '@interop/vh-resource-log':
         specifier: ^0.5.4
         version: 0.5.4
@@ -37,8 +37,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.11.0)
       '@interop/wallet-core':
-        specifier: ^0.83.1
-        version: 0.83.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))
+        specifier: ^0.86.0
+        version: 0.86.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))
       '@interop/was-client':
         specifier: ^0.80.0
         version: 0.80.0(@interop/jsonld-signatures@11.8.6)
@@ -60,6 +60,9 @@ importers:
       globals:
         specifier: ^17.6.0
         version: 17.12.0
+      path-browserify:
+        specifier: ^1.0.1
+        version: 1.0.1
       prettier:
         specifier: ^3.8.3
         version: 3.9.9
@@ -295,11 +298,11 @@ packages:
     resolution: {integrity: sha512-pqkvBU6NoPYWrxkpXgX4MX2ynYOXTNpgIL6EeUg3i8eLjEWTXBEzZe9gjSrQ2DqJHT9vNY2IXv7pQiIjvTvSyw==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.83.1':
-    resolution: {integrity: sha512-94h95zSaV8h/qNykgL5IcIoYFvu1x6n0vfL9Qg/c6uWfCKg3BRh/aMpfpeCiNbnqChTucEMdJi4a9flQaH0naQ==}
+  '@interop/wallet-core@0.86.0':
+    resolution: {integrity: sha512-wBL+GIUTjLMQr64uOvCIiraxcLdK2Bgu+QtzMP/BFr/upT0Cz3m2KfJ48noHapGAn13zzJNdBZkKjlJ6bijECQ==}
     engines: {node: '>=24.0'}
     peerDependencies:
-      '@interop/was-client': '>=0.75.0 <1.0.0'
+      '@interop/was-client': '>=0.78.0 <1.0.0'
 
   '@interop/was-client@0.80.0':
     resolution: {integrity: sha512-468ho0S1fpqb0dkQGi5qK49ZC60+iBYFQWSiwpA05n0hGEbAeMJNmaa0ACrmzmOSIHBNVbMsMnsWTnTOwyZ18w==}
@@ -1062,6 +1065,9 @@ packages:
   pako@2.2.0:
     resolution: {integrity: sha512-zJq6RP/5q+TO2OpFV3FHzlPnFjmkb7Nc99a5SNjJE+uu/PkpChs+NIZSSzbBoD+6kjiISXjfYdwj1ZRQ81dz/w==}
 
+  path-browserify@1.0.1:
+    resolution: {integrity: sha512-b7uo2UCUOYZcnF/3ID0lulOJi/bafxa1xPe7ZPsammBSpjSWQkjNxlt635YGS2MiR9GjvuXCtz2emr3jbsz98g==}
+
   path-exists@4.0.0:
     resolution: {integrity: sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==}
     engines: {node: '>=8'}
@@ -1594,7 +1600,7 @@ snapshots:
       '@interop/did-method-webvh': 5.11.1
       '@interop/storage-core': 0.20.0
 
-  '@interop/wallet-core@0.83.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))':
+  '@interop/wallet-core@0.86.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -2320,6 +2326,8 @@ snapshots:
   package-json-from-dist@1.0.1: {}
 
   pako@2.2.0: {}
+
+  path-browserify@1.0.1: {}
 
   path-exists@4.0.0: {}
 

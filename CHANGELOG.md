@@ -1,5 +1,12 @@
 # @interop/wallet-backup Changelog
 
+## 0.5.1 - TBD
+
+### Changed
+
+- Update to latest wallet-core and storage-core deps.
+- Fix cold-cache reload and fs/path warnings in browser tests.
+
 ## 0.5.0 - 2026-09-28
 
 ### Added
