@@ -1,14 +1,15 @@
 # WBU-6: Migrate chunked Resources instead of refusing them (design)
 
 - item: WBU-6
-- status: reviewed
-- approved:
+- status: approved
+- approved: 2026-09-28
 - wire-level decisions contained: none new on the wire. Section 5 lists the sink
   port contract change, the reused error names, and the re-run identity rule for
   a bytes Resource, all for sign-off.
-- decision records extracted: none
-- review: adversarial pass 2026-09-28 (section 9). Two forks are open for core
-  contributors (section 8), and approval waits on them.
+- decision records extracted: 0002 amended (the bytes-Resource identity rule),
+  0003 (chunk reassembly lives in was-client)
+- review: adversarial pass 2026-09-28 (section 9). The forks in section 8 were
+  settled 2026-09-28 (Q1 option (a), Q2 contiguity in the spec, `chunkSource`).
 
 ## 1. Problem and scope
 
@@ -27,12 +28,12 @@ plaintext bytes under the Resource's sealed content type.
 
 The review found a related defect that ships today (section 9, R3). A small
 encrypted binary or text Resource already decrypts to a `Blob`, and the walk
-hands it as `row` (to be `json`, WBU-8) under `application/json`. freewallet's
-content identity of any `Blob` is the cid of `{}`, so the second such Resource
-in a collection is reported `skipped` and lost. The sink contract change in
-section 5 covers both cases, since it routes every `Blob` result as `bytes`.
-WBU-7 tracks the small-Resource fix. It needs the same bytes-Resource identity
-rule (Q1), so Q1 is settled before either item is coded, and both use one rule.
+hands it as `json` under `application/json`. freewallet's content identity of
+any `Blob` is the cid of `{}`, so the second such Resource in a collection is
+reported `skipped` and lost. The sink contract change in section 5 covers both
+cases, since it routes every `Blob` result as `bytes`. WBU-7 tracks the
+small-Resource fix. It needs the same bytes-Resource identity rule (Q1), so Q1
+is settled before either item is coded, and both use one rule.
 
 Out of scope:
 
@@ -133,13 +134,15 @@ Out of scope:
   - Every step the walk runs on a chunked Resource before the sink sits inside
     the per-Resource open catch: the envelope parse, the chunk source, the
     decrypt, the `Blob` read. A throw there counts the Resource under its cause
-    name, except an abort, which is rethrown. `importRow` stays in its own
+    name, except an abort, which is rethrown. `importResource` stays in its own
     catch, as today, so a `QuotaExceededError` still stops the walk.
     `migrateBundle.ts:285-296` wraps the walk only in `try`/`finally`, so a
     throw that escapes it loses the whole report.
   - A stray chunk directory (no representation beside it) stays counted, as it
-    is today. A held envelope whose directory yields no chunk file is opened at
-    the end of the pass with an empty source, so it is counted too.
+    is today. A directory whose Resource the first pass already counted is
+    ignored, so no Resource is counted twice. A held envelope whose directory
+    yields no chunk file is opened at the end of the pass with an empty source,
+    so it is counted too.
   - `QuotaExceededError` from the sink still ends the walk only if the sink
     surfaces that name. was-client's chunked write wraps a 507 on a chunk or on
     the final envelope update in `EncryptionError`, with the 507 only as its
@@ -150,7 +153,7 @@ Out of scope:
   encrypted collection carries no natural identity. freewallet's
   `appRowIdentity` covers only a JSON payload (`storageManager.ts:372-378`), and
   the encrypted write path mints a fresh id per write. A fifth identity rule is
-  needed (section 8, Q1). Either answer supersedes 0002 in place at approval.
+  needed (section 8, Q1). 0002 is amended in place with it.
 - **was-client's chunked-read checks** (`EdvCodec#readChunked`,
   `EdvCodec.ts:970`). Leaned on, with a gap stated plainly. The chunk count is
   the sealed one, and the source is asked for chunks of the envelope's
@@ -182,29 +185,30 @@ Checked and untouched: invariants 1 and 2 (the walk only reads archive bytes),
 ## 3. Consumer enumeration
 
 Produced by grepping wallet-backup, was-client, was-react, was-sync, freewallet
-and dcw for `ChunkedResourceUnsupportedError`, `chunked`, `AppCollectionRow`,
-`importAppCollectionRow`, `readChunked`, `DocCipher`, `ResourceCodec`, `openRow`
-and `onProgress`, and by reading the sink port's implementers from the AGENTS.md
-parties table and space-archive's parties table.
+and dcw for `ChunkedResourceUnsupportedError`, `chunked`,
+`AppCollectionResource`, `importAppCollectionResource`, `readChunked`,
+`DocCipher`, `ResourceCodec`, `openResource` and `onProgress`, and by reading
+the sink port's implementers from the AGENTS.md parties table and
+space-archive's parties table.
 
 wallet-backup:
 
 - `src/migrate/archiveSurvey.ts` -- unchanged. It still gathers the chunked id
   set per collection.
-- `src/migrate/collectionWalk.ts` -- changed (section 5). Its `RowCipher` type
-  (`:33-35`) gains the chunk source option.
+- `src/migrate/collectionWalk.ts` -- changed (section 5). Its `ResourceCipher`
+  type (`:33-35`) gains the chunk source option.
 - `src/migrate/migrateBundle.ts:280` -- passes whether the collection is an
   encrypted app collection, so the walk knows which chunked Resources it may
   open.
-- `src/migrate/sink.ts` `AppCollectionRow` -- the type is unchanged. Its JSDoc
-  changes (`:12-17`, `:176-177`, "always `application/json`"). That is a change
-  to the sink port contract (section 5).
+- `src/migrate/sink.ts` `AppCollectionResource` -- the type is unchanged. Its
+  JSDoc changes (`:12-17`, `:176-177`, "always `application/json`"). That is a
+  change to the sink port contract (section 5).
 - `src/errors.ts` `ChunkedResourceUnsupportedError` -- kept, with a narrower
   meaning: a chunked Resource outside an encrypted app collection.
 - `src/migrate/report.ts` -- code unchanged. New causes are counted by name, as
   now. Its JSDoc at `:19` ("the Resource is chunked") is updated.
-- README.md -- "An encrypted collection's row arrives decrypted as `row`, under
-  `application/json`" is updated with the sink contract.
+- README.md -- "An encrypted collection's Resource arrives decrypted as `json`,
+  under `application/json`" is updated with the sink contract.
 - `package.json` -- the was-client devDependency (`^0.77.0`) and peer range
   (`>=0.73.0 <1.0.0`) move to the release that carries the chunk source (section
   5, "Versions").
@@ -239,14 +243,14 @@ Other repos:
   `DocCipher` interface.
 - was-sync `conflictHandler.ts:183` exports
   `ConflictDecrypt = DocCipher['decrypt']`. Unaffected for the same reason.
-- freewallet `src/stores/storageManager.ts:6403-6481` `importAppCollectionRow`
-  -- changed. It refuses a bytes body for an encrypted collection today
-  (`:6424-6427`). Its encrypted branch re-seals through a context-less
-  `DocCipher.encrypt` under the default `'content'` id derivation (`:6227-6233`,
-  `:6457-6464`), and was-client refuses a chunked write on that route
-  (`docCipher.ts:318-326`, `EdvCodec.ts:584-596`). A write by id refuses a chunk
-  plan too (`src/internal/write.ts:297-309`). So the sink needs a write route
-  the draft did not have (section 8, Q1).
+- freewallet `src/stores/storageManager.ts:6403-6481`
+  `importAppCollectionResource` -- changed. It refuses a bytes body for an
+  encrypted collection today (`:6424-6427`). Its encrypted branch re-seals
+  through a context-less `DocCipher.encrypt` under the default `'content'` id
+  derivation (`:6227-6233`, `:6457-6464`), and was-client refuses a chunked
+  write on that route (`docCipher.ts:318-326`, `EdvCodec.ts:584-596`). A write
+  by id refuses a chunk plan too (`src/internal/write.ts:297-309`). So the sink
+  needs a write route the draft did not have (section 8, Q1).
 - freewallet `snapshotAppCollection` (`storageManager.ts:6348-6372`) and
   `decryptEnvelope` (`:291-336`) -- changed. The snapshot decrypts held
   Resources with no context, so a held chunked Resource throws and is left out.
@@ -260,10 +264,10 @@ Other repos:
   (`en.json:775`, `es.json:775`) -- changed. The chunked string ("The item was
   stored in parts, which the import does not reassemble") is wrong for the cases
   it still covers, and the new causes (`NotFoundError`, `EncryptionError`,
-  `DataError`, `QuotaExceededError` from a chunked write) need mappings.
-  Unmapped names render as "Unexpected: {{name}}."
-- freewallet `src/session/contentMigration.ts:198` `importRow` -- unchanged. It
-  already forwards `bytes` when present.
+  `DataError`, a plain `Error` from Node's AEAD, `QuotaExceededError` from a
+  chunked write) need mappings. Unmapped names render as "Unexpected: {{name}}."
+- freewallet `src/session/contentMigration.ts:198` `importResource` --
+  unchanged. It already forwards `bytes` when present.
 - dcw -- no sink yet. DCW-80 (`dcw/_spec/ROADMAP.md:428`) covers only the four
   standard imports and no `appCollections`, so nothing changes today. When dcw
   adds `appCollections`, it must accept `bytes` for an encrypted collection.
@@ -278,28 +282,28 @@ Other repos:
 
 Rows are existing flows and states. Columns are what this design introduces.
 
-| Flow or state                                       | Chunked Resource, encrypted app collection                                                                                                                                                                                                                                     | Chunked Resource, plaintext or standard collection | Chunk missing or unreadable                                      |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
-| First run into an empty account                     | changed: reassembled, handed as `bytes`, counted by the sink's outcome                                                                                                                                                                                                         | fine: refused as today                             | changed: counted unopenable under the cause name                 |
-| Re-run after a partial first run                    | open: depends on the write route and identity rule (Q1). As drafted, every re-run lands another copy                                                                                                                                                                           | fine                                               | fine: counted again, as any unopenable Resource                  |
-| Re-run after a torn chunked sink write              | open (Q1): a killed write leaves a `{ pending: true }` stub and its partial chunks. Section 5 states what each Q1 option does with them                                                                                                                                        | fine                                               | not reached                                                      |
-| Resource under a generation this secret cannot open | fine: the envelope fails in `openRow` with `KeyUnwrapError` before any chunk is read (`EdvCodec.ts:917-941`)                                                                                                                                                                   | fine                                               | not reached                                                      |
-| Chunk sealed to another epoch                       | changed: the chunk's `was.epoch` differs from the envelope's, so the chunk-binding check refuses it under `EncryptionError`. `KeyMissError` is reached only by a hand-forged header                                                                                            | not reached                                        | same cell                                                        |
-| Chunk corrupted, or moved to another index          | changed: the AEAD or the index-bound AAD fails in minimal-cipher, and the Resource counts under `DataError` (`DecryptTransformer.ts:64-68`, `:114-119`)                                                                                                                        | not reached                                        | same cell                                                        |
-| Chunk from another Resource in this directory       | changed: refused by the new chunk-binding check in was-client, counted under `EncryptionError`                                                                                                                                                                                 | not reached                                        | same cell                                                        |
-| Torn source write: pending stub, partial chunk dir  | changed: the envelope records no sealed count, and the Resource counts under `EncryptionError` (`EdvCodec.ts:976-982`) before any chunk is read. With an empty directory it is opened at pass end, with the same result                                                        | fine: refused as today                             | same cell                                                        |
-| Chunk dir beside a non-chunked envelope             | changed: decrypt returns `Json` or a small `Blob`, and the walk routes it by the result type (`json` or `bytes`). The directory is ignored                                                                                                                                     | fine: refused as today                             | not reached                                                      |
-| Chunked envelope, no chunk dir in the archive       | changed: every Resource of an encrypted app collection gets a chunk source, empty when no directory exists, so it counts under `NotFoundError`                                                                                                                                 | not reached                                        | same cell                                                        |
-| Stray chunk dir, no representation                  | fine: counted unopenable under `NotFoundError`, one per directory                                                                                                                                                                                                              | fine: counted as today                             | same cell                                                        |
-| Chunk file unparseable, sidecar, or duplicate idx   | changed: only `representation` files with a valid index are buffered. Sidecars and bad names are skipped. A later duplicate index is skipped                                                                                                                                   | not reached                                        | a gap left by a skipped file counts under `NotFoundError`        |
-| Abort signal                                        | changed: checked before each chunked Resource and inside the chunk source on each call. The open catch rethrows when the signal is aborted, so the walk throws the signal's reason and does not count the Resource. A sink's upload in progress is not interrupted (no signal) | fine                                               | fine                                                             |
-| `QuotaExceededError` from the sink                  | changed: ends the walk only if the sink rethrows the 507 under that name. was-client wraps it in `EncryptionError` today (section 5)                                                                                                                                           | fine                                               | not reached                                                      |
-| Ten consecutive sink failures                       | fine: chunked Resources count toward the run like any other                                                                                                                                                                                                                    | fine                                               | fine: unopenable Resources do not count toward the run, as today |
-| Walk stops in the first pass                        | changed: chunked envelopes not yet attempted are not counted, like ordinary Resources after a stop. The report's stop names why                                                                                                                                                | fine: counted upfront as today                     | not reached                                                      |
-| `onProgress` index                                  | changed: chunked Resources are reported after the collection's other Resources, in chunk-directory order. `onProgress` carries no total, so nothing drifts                                                                                                                     | fine: counted first, as today                      | same as its column                                               |
-| Chunk directory split across the archive            | refused: the second pass sees only this collection's chunk entries, so only another chunk directory can split one. The first fragment counts under `NotFoundError`, and its envelope leaves the map, so later fragments count as strays                                        | fine                                               | same cell                                                        |
-| Hostile chunk count (many tiny forged chunks)       | accepted risk: one X25519 derivation per chunk, bounded by archive size. The abort check in the source makes it interruptible                                                                                                                                                  | not reached                                        | same cell                                                        |
-| Concurrent second migration run                     | open (Q1): under a by-id write, a run can read the other's stub mid-upload and fail under `EncryptionError`                                                                                                                                                                    | fine                                               | not reached                                                      |
+| Flow or state                                       | Chunked Resource, encrypted app collection                                                                                                                                                                                                                                      | Chunked Resource, plaintext or standard collection | Chunk missing or unreadable                                      |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
+| First run into an empty account                     | changed: reassembled, handed as `bytes`, counted by the sink's outcome                                                                                                                                                                                                          | fine: refused as today                             | changed: counted unopenable under the cause name                 |
+| Re-run after a partial first run                    | changed: written at the archived id (Q1). A 412 compares the held bytes, and equal bytes count `skipped`                                                                                                                                                                        | fine                                               | fine: counted again, as any unopenable Resource                  |
+| Re-run after a torn chunked sink write              | changed: the stub and its partial chunks sit at the archived id. The sink recognizes the stub, deletes it and rewrites the Resource (section 5)                                                                                                                                 | fine                                               | not reached                                                      |
+| Resource under a generation this secret cannot open | fine: the envelope fails in `openResource` with `KeyUnwrapError` before any chunk is read (`EdvCodec.ts:917-941`)                                                                                                                                                               | fine                                               | not reached                                                      |
+| Chunk sealed to another epoch                       | changed: the chunk's `was.epoch` differs from the envelope's, so the chunk-binding check refuses it under `EncryptionError`. `KeyMissError` is reached only by a hand-forged header                                                                                             | not reached                                        | same cell                                                        |
+| Chunk corrupted, or moved to another index          | changed: the AEAD or the index-bound AAD fails in minimal-cipher. The Resource counts under `DataError` where the platform decrypt returns null, and under a plain `Error` in Node, whose AEAD throw minimal-cipher does not rename (`DecryptTransformer.ts:64-68`, `:114-119`) | not reached                                        | same cell                                                        |
+| Chunk from another Resource in this directory       | changed: refused by the new chunk-binding check in was-client, counted under `EncryptionError`                                                                                                                                                                                  | not reached                                        | same cell                                                        |
+| Torn source write: pending stub, partial chunk dir  | changed: the envelope records no sealed count, and the Resource counts under `EncryptionError` (`EdvCodec.ts:976-982`) before any chunk is read. With an empty directory it is opened at pass end, with the same result                                                         | fine: refused as today                             | same cell                                                        |
+| Chunk dir beside a non-chunked envelope             | changed: decrypt returns `Json` or a small `Blob`, and the walk routes it by the result type (`json` or `bytes`). The directory is ignored                                                                                                                                      | fine: refused as today                             | not reached                                                      |
+| Chunked envelope, no chunk dir in the archive       | changed: every Resource of an encrypted app collection gets a chunk source, empty when no directory exists, so it counts under `NotFoundError`                                                                                                                                  | not reached                                        | same cell                                                        |
+| Stray chunk dir, no representation                  | fine: counted unopenable under `NotFoundError`, one per directory                                                                                                                                                                                                               | fine: counted as today                             | same cell                                                        |
+| Chunk file unparseable, sidecar, or duplicate idx   | changed: only `representation` files with a valid index are buffered. Sidecars and bad names are skipped. A later duplicate index is skipped                                                                                                                                    | not reached                                        | a gap left by a skipped file counts under `NotFoundError`        |
+| Abort signal                                        | changed: checked before each chunked Resource and inside the chunk source on each call. The open catch rethrows when the signal is aborted, so the walk throws the signal's reason and does not count the Resource. A sink's upload in progress is not interrupted (no signal)  | fine                                               | fine                                                             |
+| `QuotaExceededError` from the sink                  | changed: ends the walk only if the sink rethrows the 507 under that name. was-client wraps it in `EncryptionError` today (section 5)                                                                                                                                            | fine                                               | not reached                                                      |
+| Ten consecutive sink failures                       | fine: chunked Resources count toward the run like any other                                                                                                                                                                                                                     | fine                                               | fine: unopenable Resources do not count toward the run, as today |
+| Walk stops in the first pass                        | changed: chunked envelopes not yet attempted are not counted, like ordinary Resources after a stop. The report's stop names why                                                                                                                                                 | fine: counted upfront as today                     | not reached                                                      |
+| `onProgress` index                                  | changed: chunked Resources are reported after the collection's other Resources, in chunk-directory order. `onProgress` carries no total, so nothing drifts                                                                                                                      | fine: counted first, as today                      | same as its column                                               |
+| Chunk directory split across the archive            | refused: the second pass sees only this collection's chunk entries, so only another chunk directory can split one. The first fragment counts under `NotFoundError`, and its envelope leaves the map, so later fragments count as strays                                         | fine                                               | same cell                                                        |
+| Hostile chunk count (many tiny forged chunks)       | accepted risk: one X25519 derivation per chunk, bounded by archive size. The abort check in the source makes it interruptible                                                                                                                                                   | not reached                                        | same cell                                                        |
+| Concurrent second migration run                     | not supported: a run could reap the other's stub mid-upload. The sink runs one migration at a time (section 5)                                                                                                                                                                  | fine                                               | not reached                                                      |
 
 ## 5. Design
 
@@ -312,12 +316,12 @@ async decrypt({
   id,
   envelope,
   context,
-  chunks
+  chunkSource
 }: {
   id: string
   envelope: Json
   context?: CodecRequestContext
-  chunks?: (options: {
+  chunkSource?: (options: {
     docId: string
     chunkIndex: number
   }) => Promise<IEDVChunk | undefined>
@@ -328,13 +332,13 @@ The option sits on `EdvDocCipher` and the EDV codec only. The shared `DocCipher`
 interface (`src/sync/types.ts`) and `ResourceCodec.decode` keep their shape, so
 was-react, was-sync, `plaintextCipher.ts` and `refreshingDocCipher.ts` see no
 change. The EDV doc cipher holds its codec as `EdvCodec`, not as
-`ResourceCodec`, to forward the option. The name collides with the existing
-`chunks` parameter of `#readChunked`, which is the sealed count (section 8,
-naming).
+`ResourceCodec`, to forward the option. It is named `chunkSource` so it does not
+collide with `#readChunked`'s `chunks` parameter, which is the sealed count
+(section 8, naming).
 
-`codec.decode` forwards `chunks` to `#readChunked`. There, when `chunks` is
-given, the codec builds a local `Transport` subclass. Its
-`getChunk({ docId, chunkIndex })` calls `chunks({ docId, chunkIndex })` and
+`codec.decode` forwards `chunkSource` to `#readChunked`. There, when
+`chunkSource` is given, the codec builds a local `Transport` subclass. Its
+`getChunk({ docId, chunkIndex })` calls `chunkSource({ docId, chunkIndex })` and
 throws was-client's `NotFoundError` when the source returns `undefined`, the
 name `EdvClientCore` expects (`WasTransport.ts:538-543`). The codec passes it to
 `EdvClientCore.getStream` in place of `#transportFor(context)`. The `docId` is
@@ -379,33 +383,37 @@ With it true:
    in a `Map<number, Uint8Array>`.
 3. When the pass moves to a different chunk directory, or ends, the walk
    finishes the group it holds. It removes the envelope from the step 1 map,
-   parses it, and opens it through `openRow` with a chunk source. The source
-   checks the abort signal, refuses a `docId` other than the group's
+   parses it, and opens it through `openResource` with a chunk source. The
+   source checks the abort signal, refuses a `docId` other than the group's
    `resourceId`, then parses and deletes the held bytes for that index, or
    returns `undefined` when the index is absent.
 4. The decrypt result is routed by type. A `Blob` is read through `blobBytes`,
-   and the walk calls `importRow` with `{ bytes, contentType: blob.type }`. An
-   empty `blob.type` falls back to `application/octet-stream`. A `Json` result
-   goes to `{ json }`, since a chunk directory can sit beside an envelope that
-   was later rewritten small (the spec removes chunks only on DELETE,
+   and the walk calls `importResource` with `{ bytes, contentType: blob.type }`.
+   An empty `blob.type` falls back to `application/octet-stream`. A `Json`
+   result goes to `{ json }`, since a chunk directory can sit beside an envelope
+   that was later rewritten small (the spec removes chunks only on DELETE,
    `spec.md:1138-1141`).
 5. A chunk directory whose envelope is not in the map is a stray, or a later
    fragment of a split directory. It counts unopenable under `NotFoundError`,
-   once per directory. At pass end, every envelope still in the map (its
+   once per directory. A directory whose Resource the first pass already counted
+   (an envelope rewritten small, or a pending stub that fails under
+   `EncryptionError`) is ignored and its chunks are not buffered, so that
+   Resource is counted once. At pass end, every envelope still in the map (its
    directory yielded no chunk file) is opened with an empty source and counted.
 
 Step 3 and the `Blob` read in step 4 run inside the per-Resource open catch, so
 a throw there counts the Resource under its cause name. The catch rethrows when
-the signal is aborted, and `openRow` does the same, so a cancel during chunk
-reads throws the signal's reason (section 2, invariant 10). The `importRow` call
-in step 4 keeps its own catch, which counts `failed` and stops on
-`QuotaExceededError`, as today. `openRow` passes the chunk source through to
-each generation's `decrypt`. The `KeyUnwrapError` fallback to the next
-generation works as now, since the envelope is opened before any chunk is read.
+the signal is aborted, and `openResource` does the same, so a cancel during
+chunk reads throws the signal's reason (section 2, invariant 10). The
+`importResource` call in step 4 keeps its own catch, which counts `failed` and
+stops on `QuotaExceededError`, as today. `openResource` passes the chunk source
+through to each generation's `decrypt`. The `KeyUnwrapError` fallback to the
+next generation works as now, since the envelope is opened before any chunk is
+read.
 
 The same result-type routing applies to the first pass. There, a small encrypted
 binary or text Resource decrypts to a `Blob` and is handed as `bytes` under
-`blob.type`, instead of as `row` under `application/json`. That is WBU-7's fix,
+`blob.type`, instead of as `json` under `application/json`. That is WBU-7's fix,
 restated here so this design does not depend on it landing first.
 
 ### Trust root
@@ -420,37 +428,49 @@ binary whatever the type says (`internal/content.ts:189-194`).
 
 ### Sink port contract change
 
-`AppCollectionRow`'s type is unchanged. Its documented meaning changes. An
+`AppCollectionResource`'s type is unchanged. Its documented meaning changes. An
 encrypted collection's Resource arrives as `{ json }` when it decrypts to JSON,
 and as `{ bytes }` under its sealed content type when it decrypts to a `Blob`.
 That covers a chunked Resource and a small binary or text Resource alike. A
 chunked Resource whose sealed type is `application/json` still arrives as
 `bytes`, which contradicts `sink.ts:12-17` ("A JSON type ... arrives parsed as
-`row`"), so that JSDoc is rewritten. A sink that assumed an encrypted Resource
-is always JSON now sees bytes. The field is named `json` after WBU-8 renames
-`row` (signed off by the user 2026-09-28). This is a change to a contract this
-package owns, so it is a walk of the AGENTS.md parties table. freewallet is the
-one sink affected today. The CHANGELOG names it as a breaking change to the sink
-port.
+`json`"), so that JSDoc is rewritten. A sink that assumed an encrypted Resource
+is always JSON now sees bytes. WBU-8 renamed the field from `row` to `json`
+(signed off by the user 2026-09-28). This is a change to a contract this package
+owns, so it is a walk of the AGENTS.md parties table. freewallet is the one sink
+affected today. The CHANGELOG names it as a breaking change to the sink port.
 
 ### freewallet sink
 
 The sink needs a route that can store an encrypted chunked Resource, and a rule
-that recognizes it on a re-run. Neither exists (section 3). Q1 in section 8 is
-the fork. Whichever option lands, these hold:
+that recognizes it on a re-run. Neither exists (section 3). Q1 settled both
+(section 8): a bytes Resource in an encrypted collection is written at its
+archived `resourceId`, and that id is its identity.
 
-- A 507 during a chunked write surfaces as `QuotaExceededError`. The sink walks
-  the thrown error's `cause` for it, or was-client's `#chunkedWriteFailed`
-  rethrows the quota error itself after cleanup. The second is preferred, since
-  it also fixes the misleading "chunks were not written" message after a 507 on
-  the final envelope update.
-- The snapshot of held Resources reads a held chunked Resource, or records it by
-  an identity that needs no reassembly. Otherwise a re-run cannot see it.
-- A pending stub left by a killed write is handled on the next run. It is either
-  reaped or counted. A stub left in place with no report is a defect.
-- The snapshot's `Promise.all` over every held document
-  (`storageManager.ts:6352`) holds every held Resource at once. If the snapshot
-  reassembles held chunked Resources, it does so one at a time.
+- The write goes through a random-id encrypted handle, with a new was-client
+  write-by-id path that accepts a chunk plan (`src/internal/write.ts:297-309`
+  refuses one today). A small bytes Resource (WBU-7) takes the same route, so
+  both cases share one identity rule. An encrypted JSON Resource keeps its
+  content identity (`appRowIdentity`) and its current route.
+- A 412 on that id reads the held copy and compares bytes, as the plaintext
+  bytes path does. Equal bytes count `skipped`. Different bytes count
+  `conflicting`, and the held copy is untouched. Reading a held chunked Resource
+  here reassembles one Resource over the network, through the existing context
+  path.
+- The snapshot of held Resources records a bytes Resource by its id, so it needs
+  no reassembly. The snapshot's `Promise.all` over every held document
+  (`storageManager.ts:6352`) therefore never holds a reassembled Resource.
+- A killed write leaves a `{ pending: true }` stub and its partial chunks at the
+  archived id. A later run's 412 read of that id fails under `EncryptionError`.
+  The sink recognizes the pending stub, deletes it (chunks included), and
+  rewrites the Resource. A stub is reaped only at an id this run is importing,
+  so debris is bounded to known ids.
+- A second concurrent run could reap a stub the first run is still filling. The
+  sink runs one migration at a time.
+- A 507 during a chunked write surfaces as `QuotaExceededError`. was-client's
+  `#chunkedWriteFailed` rethrows the quota error itself after cleanup, which
+  also fixes the misleading "chunks were not written" message after a 507 on the
+  final envelope update.
 
 ### Versions
 
@@ -469,14 +489,16 @@ No new permanent wire artifact. For sign-off:
 - The rename of the sink payload field from `row` to `json` (WBU-8), signed off
   2026-09-28.
 - The re-run identity rule for a bytes Resource in an encrypted collection (Q1).
-  It supersedes decision 0002.
+  It amends decision 0002.
 - The report causes a chunked Resource can now carry. All are existing names:
   - `NotFoundError` (was-client) for a missing chunk, a missing chunk directory,
     or a stray directory;
   - `EncryptionError` (was-client) for a pending stub or a chunk-binding
     mismatch, which includes a chunk sealed to another epoch;
   - `DataError` (minimal-cipher) for a corrupted chunk or one moved to another
-    index;
+    index, where the platform decrypt returns null. In Node the same failure
+    surfaces as a plain `Error`, since minimal-cipher does not rename Node's
+    AEAD throw;
   - `ChunkedResourceUnsupportedError` (kept) for the refused cases.
 
   Malformed chunk framing can still surface a generic name (`TypeError`, plain
@@ -484,14 +506,14 @@ No new permanent wire artifact. For sign-off:
   reachable only through a hand-forged chunk header. The walk counts them under
   that name and does not rename them.
 
-- `ValidationError` for a `decrypt` given both `context` and `chunks`.
-- The `chunks` option name on was-client's `decrypt` is a TypeScript API name,
-  not a wire artifact. It is listed so the name is reviewed with the rest.
+- `ValidationError` for a `decrypt` given both `context` and `chunkSource`.
+- The `chunkSource` option name on was-client's `decrypt` is a TypeScript API
+  name, not a wire artifact. Settled 2026-09-28 (section 8).
 
 ## 6. Alternatives rejected
 
 - **Stream the Resource to the sink.** A `ReadableStream` body in
-  `AppCollectionRow` would keep invariant 3 as stated, but it buys nothing
+  `AppCollectionResource` would keep invariant 3 as stated, but it buys nothing
   today. was-client's reader already buffers the decrypt stream into a `Blob`
   (`EdvCodec.ts:1010-1020`), was-client's `put` takes no stream, and
   freewallet's re-run comparison reads the held copy whole. It would also change
@@ -539,8 +561,8 @@ suite's throwing `fetch` stays installed:
   (filesystem and postgres). The sidecars are skipped.
 - A missing chunk file counts under `NotFoundError`. A chunk sealed to another
   epoch, and a chunk from another Resource, count under `EncryptionError`. Two
-  chunks of one Resource swapped between indexes count under `DataError`. In
-  each case the other Resources migrate.
+  chunks of one Resource swapped between indexes count under `DataError`, or
+  under a plain `Error` in Node. In each case the other Resources migrate.
 - A chunked envelope with no chunk directory counts under `NotFoundError`. A
   stray chunk directory counts under `NotFoundError`.
 - A pending stub with a partial chunk directory counts under `EncryptionError`.
@@ -560,10 +582,10 @@ suite's throwing `fetch` stays installed:
 `pnpm run test:dist` (`test/probe/transportClosure.mjs`), with the two new
 edv-client entries and the devDependency on the new was-client, stays green.
 
-was-client gains unit tests for the `chunks` option: it reassembles, it keeps
-the sealed-count and bound-id refusals, it refuses a chunk whose binding differs
-from the envelope's, it raises `NotFoundError` for a missing index, and it
-refuses `chunks` with `context`.
+was-client gains unit tests for the `chunkSource` option: it reassembles, it
+keeps the sealed-count and bound-id refusals, it refuses a chunk whose binding
+differs from the envelope's, it raises `NotFoundError` for a missing index, and
+it refuses `chunkSource` with `context`.
 
 freewallet gains sink tests, shaped by Q1: an encrypted app collection accepts a
 `bytes` Resource, a re-run of the same Resource is `skipped`, a 507 mid-chunk
@@ -597,14 +619,21 @@ through `blobBytes` (section 2, invariant 4).
   archived id as the identity decision 0002 already uses there, and it bounds
   torn-state debris to one known id. It costs a was-client write path.
 
+  Settled 2026-09-28: (a). Section 5 ("freewallet sink") states the route.
+
 - **Q2. Chunk directory contiguity.** Owner: core contributors, at review.
   Either the profile spec's entry-order section states it and space-archive's
   ARCHITECTURE.md repeats it, or the walk tolerates a split directory. The
   design assumes the former. Tolerating it costs one archive pass per split
   Resource, and those are rare.
+
+  Settled 2026-09-28: the profile spec states contiguity, and space-archive's
+  ARCHITECTURE.md repeats it. The walk refuses a split directory as section 4
+  describes.
+
 - **Naming.** The `chunks` option collides with `#readChunked`'s `chunks`
   parameter, which is the sealed count. `chunkSource` is one alternative. Owner:
-  core contributors, with the sign-off list.
+  core contributors, with the sign-off list. Settled 2026-09-28: `chunkSource`.
 - The memory cost of the largest realistic chunked Resource on dcw, and whether
   React Native's `Blob` constructor accepts `Uint8Array` parts at all (section
   2, invariant 4). If it does not, was-client's decrypt of any binary Resource
@@ -682,3 +711,14 @@ Completeness critic, 2026-09-28, over the revised doc:
   section 2 and section 5, step 1 (only envelopes that fail under an empty
   source are held).
 - C8. The fixture route skipped `EdvCodec`. Landed in section 7.
+
+Implementation, 2026-09-28. Two places where the code settled what the doc left
+loose:
+
+- I1. A chunk moved to another index surfaces as a plain `Error` in Node, not
+  `DataError`. minimal-cipher names the failure only where the platform decrypt
+  returns null. Landed in sections 3, 4, 5 and 7.
+- I2. Step 5 read literally counted a directory whose Resource the first pass
+  had already counted as a stray too, which contradicted section 4 and
+  section 7. The walk ignores such a directory. Landed in section 2
+  (invariant 10) and section 5, step 5.

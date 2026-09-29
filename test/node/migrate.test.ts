@@ -31,13 +31,17 @@ import {
   EDV_SCHEME_VERSION,
   EPOCH_CONFIGURATION_STATE_TYPE
 } from '@interop/was-client/edv/core'
-import type { RecipientPublicKey } from '@interop/was-client/edv/core'
-import type { IndexSchema } from '@interop/was-client'
-import type { ArchiveFile } from '@interop/space-archive'
+import type {
+  ChunkSource,
+  RecipientPublicKey
+} from '@interop/was-client/edv/core'
+import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
+import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
 import {
   collectBytes,
   fileNameFor,
-  packSpaceArchive
+  packSpaceArchive,
+  parseResourceFileName
 } from '@interop/space-archive'
 import {
   migrateBundle,
@@ -53,12 +57,15 @@ import type {
   MigrationSink,
   SinkOutcome
 } from '../../src/index.js'
+import { walkCollection } from '../../src/migrate/collectionWalk.js'
+import { CollectionTally } from '../../src/migrate/report.js'
 import {
   buildBundle,
   collectionDescriptor,
   collectionDir,
   collectionLogFile,
   chunkDir,
+  chunkDirWith,
   encryptResources,
   jsonFile,
   keyMapDir,
@@ -66,12 +73,13 @@ import {
   mintGenerations,
   plaintextResources,
   sealedCustom,
+  sealBinaryResources,
   recipientFor,
   rosterDescriptor,
   FIXTURE_META,
   FIXTURE_SPACE_ID
 } from '../fixtures/migration/bundle.js'
-import type { Generation } from '../fixtures/migration/bundle.js'
+import type { BytesFile, Generation } from '../fixtures/migration/bundle.js'
 
 /**
  * One collection of a fixture account.
@@ -90,6 +98,11 @@ interface FixtureCollection {
   metadataFile?: 'omit' | 'broken'
   /** further files written verbatim into the collection directory */
   extraFiles?: Array<{ name: string; bytes: Uint8Array }>
+  /**
+   * further entries sealed under the collection's own descriptor (binary
+   * Resources and their chunk directories), written after its Resources
+   */
+  sealedEntries?: (encryption: CollectionEncryption) => Promise<ArchiveEntry[]>
   /** the generations the descriptor's blinded-index key is wrapped to */
   hmacFor?: Generation[]
   /**
@@ -200,7 +213,7 @@ async function fixtureBundle({
   ]
   for (const collection of collections) {
     let metadata = collection.metadata
-    let leadingFiles: ArchiveFile[]
+    let leadingFiles: ArchiveEntry[]
     if (collection.plaintext === true) {
       leadingFiles = plaintextResources(collection.resources)
     } else {
@@ -239,7 +252,8 @@ async function fixtureBundle({
           collectionId: collection.collectionId,
           encryption,
           resources: collection.resources
-        }))
+        })),
+        ...((await collection.sealedEntries?.(encryption)) ?? [])
       ]
     }
     entries.push(
@@ -1658,6 +1672,568 @@ describe('migrateBundle', () => {
       )
       expect(report.collections['app-b']!.accepted).toBe(1)
       expect(report.stoppedAt).toBeUndefined()
+    })
+
+    describe('chunked and binary Resources in an encrypted app collection', () => {
+      /**
+       * Deterministic test bytes.
+       * @param length {number}
+       * @param step {number}
+       * @returns {Uint8Array}
+       */
+      function bytesOf(length: number, step: number): Uint8Array {
+        return new Uint8Array(length).map(
+          (_value, index) => (index * step) % 251
+        )
+      }
+
+      // Three chunks of 24 plaintext bytes each under the fixture's settings.
+      const photo = bytesOf(64, 7)
+      const otherPhoto = bytesOf(64, 11)
+
+      /**
+       * A `.meta.<index>.json` sidecar inside a chunk directory.
+       * @param index {number}
+       * @returns {ArchiveFile}
+       */
+      function sidecar(index: number): ArchiveFile {
+        return jsonFile({ name: `.meta.${index}.json`, document: {} })
+      }
+
+      /**
+       * Migrates one encrypted app collection, `photos`, holding one JSON
+       * Resource and the sealed entries the caller builds.
+       *
+       * @param options {object}
+       * @param options.entries {function}   builds the sealed entries from
+       *   the collection's descriptor and its one generation
+       * @param [options.epochs] {number}   how many epochs the collection
+       *   descriptor has, all opened by the generation; 1 by default
+       * @param [options.sink] {ReturnType<typeof appRecordingSink>}
+       * @param [options.signal] {AbortSignal}
+       * @returns {Promise<object>}   the sink, and the report or the rejection
+       */
+      async function runPhotos({
+        entries,
+        epochs = 1,
+        sink = appRecordingSink(),
+        signal
+      }: {
+        entries: (options: {
+          encryption: CollectionEncryption
+          seal: (
+            resources: Array<{
+              data: Uint8Array
+              contentType: string
+              id?: string
+            }>,
+            options?: { tearChunksFrom?: number; epochIndex?: number }
+          ) => ReturnType<typeof sealBinaryResources>
+        }) => Promise<ArchiveEntry[]>
+        epochs?: number
+        sink?: ReturnType<typeof appRecordingSink>
+        signal?: AbortSignal
+      }): Promise<{
+        sink: ReturnType<typeof appRecordingSink>
+        run: Promise<MigrationReport>
+      }> {
+        const [generation] = await mintGenerations(1)
+        const { code, recipient } = await recoverySecret()
+        const bundle = await fixtureBundle({
+          generations: [generation!],
+          recipients: [recipient],
+          collections: [
+            {
+              collectionId: 'photos',
+              resources: [{ note: 'one' }],
+              openedBy: Array.from({ length: epochs }, () => [generation!]),
+              sealedEntries: encryption =>
+                entries({
+                  encryption,
+                  seal: (resources, { tearChunksFrom, epochIndex } = {}) =>
+                    sealBinaryResources({
+                      collectionId: 'photos',
+                      encryption:
+                        epochIndex === undefined
+                          ? encryption
+                          : {
+                              ...encryption,
+                              currentEpoch: encryption.epochs![epochIndex]!.id
+                            },
+                      generation: generation!,
+                      resources,
+                      ...(tearChunksFrom !== undefined && { tearChunksFrom })
+                    })
+                })
+            }
+          ]
+        })
+        const run = migrateBundle({
+          bundle,
+          secret: { recoveryCode: code },
+          sink,
+          ...(signal !== undefined && { signal })
+        })
+        return { sink, run }
+      }
+
+      /**
+       * The app Resources the sink saw, by Resource id.
+       * @param sink {ReturnType<typeof appRecordingSink>}
+       * @returns {Map<string, AppCollectionResource>}
+       */
+      function byId(
+        sink: ReturnType<typeof appRecordingSink>
+      ): Map<string, AppCollectionResource> {
+        return new Map(
+          sink.appResources.map(resource => [resource.resourceId, resource])
+        )
+      }
+
+      it('migrates a chunked Resource as bytes under its sealed type, its directory before or after the envelope', async () => {
+        const json = new TextEncoder().encode(
+          JSON.stringify({ a: 'long enough to be chunked' })
+        )
+        let ids: string[] = []
+        const { sink, run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const [after, before, sealedJson] = await seal([
+              { data: photo, contentType: 'image/png' },
+              { data: otherPhoto, contentType: 'image/jpeg' },
+              { data: json, contentType: 'application/json' }
+            ])
+            ids = [after!.id, before!.id, sealedJson!.id]
+            return [
+              after!.representation,
+              chunkDirWith({ resourceId: after!.id, files: after!.chunks }),
+              chunkDirWith({ resourceId: before!.id, files: before!.chunks }),
+              before!.representation,
+              sealedJson!.representation,
+              chunkDirWith({
+                resourceId: sealedJson!.id,
+                files: sealedJson!.chunks
+              })
+            ]
+          }
+        })
+        const report = await run
+        const seen = byId(sink)
+        expect(seen.get(ids[0]!)).toEqual({
+          collectionId: 'photos',
+          resourceId: ids[0],
+          contentType: 'image/png',
+          bytes: photo
+        })
+        expect(seen.get(ids[1]!)).toEqual({
+          collectionId: 'photos',
+          resourceId: ids[1],
+          contentType: 'image/jpeg',
+          bytes: otherPhoto
+        })
+        // A chunked Resource sealed as JSON still arrives as its bytes.
+        expect(seen.get(ids[2]!)).toEqual({
+          collectionId: 'photos',
+          resourceId: ids[2],
+          contentType: 'application/json',
+          bytes: json
+        })
+        expect(report.collections['photos']).toEqual(tally({ accepted: 4 }))
+      })
+
+      it('reassembles ten or more chunks in index order and skips sidecars in either order', async () => {
+        // Twelve chunks: by file name, `r.10` and `r.11` sort before `r.2`.
+        const big = bytesOf(24 * 11 + 5, 13)
+        let ids: string[] = []
+        const { sink, run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const [large, small] = await seal([
+              { data: big, contentType: 'video/mp4' },
+              { data: photo, contentType: 'image/png' }
+            ])
+            ids = [large!.id, small!.id]
+            const byName = [...large!.chunks].sort((a, b) =>
+              a.name < b.name ? -1 : 1
+            )
+            expect(byName.map(chunk => chunk.name)).not.toEqual(
+              large!.chunks.map(chunk => chunk.name)
+            )
+            return [
+              large!.representation,
+              chunkDirWith({
+                resourceId: large!.id,
+                files: byName.flatMap((chunk, index) => [chunk, sidecar(index)])
+              }),
+              small!.representation,
+              chunkDirWith({
+                resourceId: small!.id,
+                files: small!.chunks.flatMap((chunk, index) => [
+                  sidecar(index),
+                  chunk
+                ])
+              })
+            ]
+          }
+        })
+        const report = await run
+        const seen = byId(sink)
+        expect(seen.get(ids[0]!)).toMatchObject({
+          contentType: 'video/mp4',
+          bytes: big
+        })
+        expect(seen.get(ids[1]!)).toMatchObject({
+          contentType: 'image/png',
+          bytes: photo
+        })
+        expect(report.collections['photos']).toEqual(tally({ accepted: 3 }))
+      })
+
+      it('hands small binary and text Resources on as bytes under their sealed types', async () => {
+        const first = bytesOf(8, 3)
+        const second = bytesOf(8, 5)
+        const text = new TextEncoder().encode('hi')
+        let ids: string[] = []
+        const { sink, run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const sealed = await seal([
+              { data: first, contentType: 'image/png' },
+              { data: second, contentType: 'image/png' },
+              { data: text, contentType: 'text/plain' }
+            ])
+            ids = sealed.map(resource => resource.id)
+            expect(sealed.every(resource => resource.chunks.length === 0)).toBe(
+              true
+            )
+            return sealed.map(resource => resource.representation)
+          }
+        })
+        const report = await run
+        const seen = byId(sink)
+        expect(seen.get(ids[0]!)).toMatchObject({
+          contentType: 'image/png',
+          bytes: first
+        })
+        expect(seen.get(ids[1]!)).toMatchObject({
+          contentType: 'image/png',
+          bytes: second
+        })
+        expect(seen.get(ids[2]!)!.contentType).toMatch(/^text\/plain/)
+        expect(seen.get(ids[2]!)).toMatchObject({ bytes: text })
+        expect(report.collections['photos']).toEqual(tally({ accepted: 4 }))
+      })
+
+      it('counts a missing, foreign, other-epoch or swapped chunk by its error name and migrates the rest', async () => {
+        let healthyId = ''
+        const { sink, run } = await runPhotos({
+          epochs: 2,
+          entries: async ({ seal }) => {
+            const [healthy, missing, foreign, donor, swapped] = await seal([
+              { data: photo, contentType: 'image/png' },
+              { data: photo, contentType: 'image/png' },
+              { data: photo, contentType: 'image/png' },
+              { data: otherPhoto, contentType: 'image/png' },
+              { data: photo, contentType: 'image/png' }
+            ])
+            const [current] = await seal([
+              { data: photo, contentType: 'image/png' }
+            ])
+            // The same Resource id written again under the older epoch.
+            const [older] = await seal(
+              [{ data: photo, contentType: 'image/png', id: current!.id }],
+              { epochIndex: 0 }
+            )
+            healthyId = healthy!.id
+            const directory = (
+              id: string,
+              files: BytesFile[]
+            ): ArchiveEntry[] => [chunkDirWith({ resourceId: id, files })]
+            // A chunk keeps its own file name when moved: only its bytes
+            // tell where it came from.
+            const moved = (to: BytesFile, from: BytesFile): BytesFile => ({
+              name: to.name,
+              bytes: from.bytes
+            })
+            return [
+              healthy!.representation,
+              ...directory(healthy!.id, healthy!.chunks),
+              missing!.representation,
+              ...directory(missing!.id, [
+                missing!.chunks[0]!,
+                missing!.chunks[2]!
+              ]),
+              foreign!.representation,
+              ...directory(foreign!.id, [
+                foreign!.chunks[0]!,
+                moved(foreign!.chunks[1]!, donor!.chunks[1]!),
+                foreign!.chunks[2]!
+              ]),
+              current!.representation,
+              ...directory(current!.id, [
+                current!.chunks[0]!,
+                moved(current!.chunks[1]!, older!.chunks[1]!),
+                current!.chunks[2]!
+              ]),
+              swapped!.representation,
+              ...directory(swapped!.id, [
+                moved(swapped!.chunks[0]!, swapped!.chunks[1]!),
+                moved(swapped!.chunks[1]!, swapped!.chunks[0]!),
+                swapped!.chunks[2]!
+              ])
+            ]
+          }
+        })
+        const report = await run
+        expect(byId(sink).get(healthyId)).toMatchObject({ bytes: photo })
+        expect(report.collections['photos']).toEqual(
+          tally({
+            accepted: 2,
+            unopenable: 4,
+            unopenableCauses: {
+              NotFoundError: 1,
+              EncryptionError: 2,
+              // The swapped chunks fail their index-bound AAD. Node's AEAD
+              // throws a plain `Error` there; minimal-cipher names the failure
+              // `DataError` only where the platform decrypt returns null.
+              Error: 1
+            }
+          })
+        )
+      })
+
+      it('counts a chunked envelope with no chunk directory, and a stray chunk directory, as missing chunks', async () => {
+        const { run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const [lonely, stray] = await seal([
+              { data: photo, contentType: 'image/png' },
+              { data: otherPhoto, contentType: 'image/png' }
+            ])
+            return [
+              lonely!.representation,
+              chunkDirWith({ resourceId: stray!.id, files: stray!.chunks }),
+              chunkDir('zNoSuchResource')
+            ]
+          }
+        })
+        expect((await run).collections['photos']).toEqual(
+          tally({
+            accepted: 1,
+            unopenable: 3,
+            unopenableCauses: { NotFoundError: 3 }
+          })
+        )
+      })
+
+      it('counts a pending stub once, whether its chunk directory is partial, empty, or holds only sidecars', async () => {
+        const { run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const [partial] = await seal(
+              [{ data: photo, contentType: 'image/png' }],
+              { tearChunksFrom: 1 }
+            )
+            const [empty, sidecars] = await seal(
+              [
+                { data: photo, contentType: 'image/png' },
+                { data: photo, contentType: 'image/png' }
+              ],
+              { tearChunksFrom: 0 }
+            )
+            expect(partial!.chunks).toHaveLength(1)
+            expect(empty!.chunks).toHaveLength(0)
+            return [
+              partial!.representation,
+              chunkDirWith({ resourceId: partial!.id, files: partial!.chunks }),
+              chunkDirWith({ resourceId: empty!.id, files: [] }),
+              empty!.representation,
+              sidecars!.representation,
+              chunkDirWith({
+                resourceId: sidecars!.id,
+                files: [sidecar(0), sidecar(1)]
+              })
+            ]
+          }
+        })
+        expect((await run).collections['photos']).toEqual(
+          tally({
+            accepted: 1,
+            unopenable: 3,
+            unopenableCauses: { EncryptionError: 3 }
+          })
+        )
+      })
+
+      it('migrates a JSON Resource that sits beside a chunk directory as json', async () => {
+        let smallId = ''
+        const { sink, run } = await runPhotos({
+          entries: async ({ encryption, seal }) => {
+            const [small] = await encryptResources({
+              collectionId: 'photos',
+              encryption,
+              resources: [{ note: 'rewritten small' }]
+            })
+            smallId = parseResourceFileName(small!.name).resourceId
+            const [chunked] = await seal([
+              { data: photo, contentType: 'image/png' }
+            ])
+            return [
+              small!,
+              chunkDirWith({ resourceId: smallId, files: chunked!.chunks })
+            ]
+          }
+        })
+        const report = await run
+        expect(byId(sink).get(smallId)).toMatchObject({
+          contentType: 'application/json',
+          json: { note: 'rewritten small' }
+        })
+        expect(report.collections['photos']).toEqual(tally({ accepted: 2 }))
+      })
+
+      it('counts a chunk directory split by another as a missing chunk, and its later fragment as a stray', async () => {
+        let intactId = ''
+        const { sink, run } = await runPhotos({
+          entries: async ({ seal }) => {
+            const [split, intact] = await seal([
+              { data: photo, contentType: 'image/png' },
+              { data: otherPhoto, contentType: 'image/png' }
+            ])
+            intactId = intact!.id
+            return [
+              split!.representation,
+              intact!.representation,
+              chunkDirWith({
+                resourceId: split!.id,
+                files: [split!.chunks[0]!]
+              }),
+              chunkDirWith({ resourceId: intact!.id, files: intact!.chunks }),
+              chunkDirWith({
+                resourceId: split!.id,
+                files: split!.chunks.slice(1)
+              })
+            ]
+          }
+        })
+        const report = await run
+        expect(byId(sink).get(intactId)).toMatchObject({ bytes: otherPhoto })
+        expect(report.collections['photos']).toEqual(
+          tally({
+            accepted: 2,
+            unopenable: 2,
+            unopenableCauses: { NotFoundError: 2 }
+          })
+        )
+      })
+
+      it('aborts between chunked Resources with the signal reason', async () => {
+        const controller = new AbortController()
+        const reason = new Error('the user cancelled the import')
+        const sink = appRecordingSink({
+          answer: ({ json }) => {
+            if (json instanceof Uint8Array) {
+              controller.abort(reason)
+            }
+            return 'accepted'
+          }
+        })
+        const { run } = await runPhotos({
+          sink,
+          signal: controller.signal,
+          entries: async ({ seal }) => {
+            const sealed = await seal([
+              { data: photo, contentType: 'image/png' },
+              { data: otherPhoto, contentType: 'image/png' }
+            ])
+            return sealed.flatMap(resource => [
+              resource.representation,
+              chunkDirWith({ resourceId: resource.id, files: resource.chunks })
+            ])
+          }
+        })
+        await expect(run).rejects.toBe(reason)
+        expect(
+          sink.appResources.filter(resource => 'bytes' in resource)
+        ).toHaveLength(1)
+      })
+
+      it("aborts during a Resource's chunk reads with the signal reason, and does not count it", async () => {
+        const controller = new AbortController()
+        const reason = new Error('the user cancelled the import')
+        const chunk = new TextEncoder().encode('{}')
+        const archive = await collectBytes(
+          (await packSpaceArchive({
+            spaceId: FIXTURE_SPACE_ID,
+            entries: [
+              collectionDir({
+                collectionId: 'photos',
+                files: [
+                  jsonFile({
+                    name: fileNameFor({
+                      resourceId: 'zChunked',
+                      contentType: 'application/json'
+                    }),
+                    document: {}
+                  }),
+                  chunkDirWith({
+                    resourceId: 'zChunked',
+                    files: [0, 1].map(index => ({
+                      name: fileNameFor({
+                        resourceId: String(index),
+                        contentType: 'application/octet-stream'
+                      }),
+                      bytes: chunk
+                    }))
+                  })
+                ]
+              })
+            ]
+          })) as unknown as AsyncIterable<Uint8Array>
+        )
+        // Stands in for was-client's reader: it asks for chunks in order,
+        // and wraps a source failure in an error of its own.
+        const cipher = {
+          async decrypt({
+            id,
+            chunkSource
+          }: {
+            id: string
+            envelope: never
+            chunkSource?: ChunkSource
+          }): Promise<unknown> {
+            try {
+              for (const chunkIndex of [0, 1]) {
+                if (
+                  (await chunkSource!({ docId: id, chunkIndex })) === undefined
+                ) {
+                  throw Object.assign(new Error('no chunk'), {
+                    name: 'NotFoundError'
+                  })
+                }
+                controller.abort(reason)
+              }
+            } catch (err) {
+              if ((err as Error).name === 'NotFoundError') {
+                throw err
+              }
+              throw new Error('stream failed', { cause: err })
+            }
+            return {}
+          }
+        }
+        const importResource = vi.fn(async () => 'accepted' as const)
+        const walkTally = new CollectionTally()
+        await expect(
+          walkCollection({
+            archive,
+            collectionId: 'photos',
+            importResource,
+            ciphers: [cipher],
+            chunked: new Set(['zChunked']),
+            openChunked: true,
+            tally: walkTally,
+            signal: controller.signal
+          })
+        ).rejects.toBe(reason)
+        expect(importResource).not.toHaveBeenCalled()
+        expect(walkTally.toReport()).toEqual(tally())
+      })
     })
 
     it('stops the whole walk on a quota refusal from ensureCollection', async () => {

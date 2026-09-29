@@ -283,3 +283,52 @@ lets the picked file fill as the export proceeds.
         an account with many recovery codes is not strictly serial; the bound,
         not the host, decides, since the host's per-Space callback cannot see
         the consumer's backpressure
+
+---
+
+### WBU-8: Rename the sink port's "row" vocabulary to Resource
+
+- status: done (2026-09-28)
+- priority: high
+- labels: migrate, sink, naming
+- touches:
+  - [x] wallet-backup: `src/migrate/sink.ts` (`AppCollectionRow` to
+        `AppCollectionResource`, `importRow` to `importResource`, the `row`
+        payload field to `json` on every sink method), and the walk's internal
+        names (`RowCipher`, `OpenedRow`, `readRow`, `openRow`, `walkedRows`);
+        README; CHANGELOG names the sink port change as breaking. Shipped: all
+        renamed, "row" prose in `src/` and the tests reworded, README example
+        and prose updated, breaking entry under 0.5.0.
+  - [x] wallet-backup ARCHITECTURE.md (prose outside the Glossary) and AGENTS.md
+        (a walk of the parties table). Shipped: ARCHITECTURE.md layer map,
+        invariants 3 and 10, and the EDV contract paragraph. AGENTS.md
+        unaffected (the parties table names only freewallet's own "import
+        activity row").
+  - [x] freewallet: `src/session/contentMigration.ts` (the sink), the
+        `importAppCollectionRow` import function and its tests, plus its
+        ARCHITECTURE/AGENTS files. Shipped: the sink and
+        `importAppCollectionResource` with its tests, ARCHITECTURE.md, and
+        `docs/architecture/session-persistence.md`; AGENTS.md unaffected (no old
+        names); CHANGELOG entry under 0.44.0.
+  - [x] dcw: no sink over the port yet; record the new names on DCW-80. Shipped:
+        DCW-80's prose names the 0.5.0 port shape.
+- acceptance:
+  - [x] No identifier, JSDoc or README text in `src/migrate/` uses "row" for the
+        migrated unit or its payload.
+  - [x] Every sink method's JSON payload field is `json`; app collections take
+        `{ json }` or `{ bytes }`.
+  - [x] Node suite green under the new names.
+  - [x] CHANGELOG entry, and README and ARCHITECTURE updated.
+
+Context: the migration code calls the unit it migrates a "row" and also names
+the parsed JSON payload field `row`. The two meanings collide exactly where the
+sink contract distinguishes `{ row }` from `{ bytes }`, which makes WBU-6 and
+WBU-7 hard to state. The Glossary now names the unit a Resource (the WAS spec's
+word for the same thing) and the JSON payload `json`, with "row" on the avoid
+list. The code and the rest of the docs still use the old names.
+
+discovered-from: WBU-6, in its design review (2026-09-28). The names were signed
+off by the user on 2026-09-28. Decision records keep their wording, since
+records are superseded rather than rewritten. The host's "activity row" is
+freewallet's own term and is out of scope. Landing this before WBU-6 and WBU-7
+lets both be written against the new names.

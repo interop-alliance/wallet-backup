@@ -2,7 +2,28 @@
 
 ## 0.5.0 - TBD
 
+### Added
+
+- The migration walk migrates chunked Resources in encrypted app collections.
+  was-client reassembles each one from the archive's chunk files through a
+  `chunkSource`, and the sink receives it whole as `bytes`. A missing chunk, a
+  chunked envelope with no chunk directory, and a stray chunk directory count as
+  `unopenable` under `NotFoundError`; a pending stub or a chunk bound to another
+  Resource or epoch under `EncryptionError`.
+
 ### Changed
+
+- BREAKING: an encrypted collection's Resource reaches
+  `appCollections.importResource` by what it decrypts to. JSON arrives as
+  `{ json }` under `application/json`. A binary or text Resource, small or
+  chunked, arrives as `{ bytes }` under its sealed content type
+  (`application/octet-stream` when none), including a chunked Resource sealed as
+  `application/json`. Small binary Resources previously arrived as a `Blob` in
+  `json` under `application/json`.
+- BREAKING: the `@interop/was-client` peer range is now `>=0.80.0`, the release
+  that carries `chunkSource` and exports `blobBytes` from `./edv/core`.
+- `ChunkedResourceUnsupportedError` now covers only a chunked Resource in a
+  plaintext app collection or a standard collection.
 
 - BREAKING: the sink port names the migrated unit a Resource. `AppCollectionRow`
   is now `AppCollectionResource`, and `appCollections.importRow` is now

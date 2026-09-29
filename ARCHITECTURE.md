@@ -34,7 +34,7 @@ src/migrate/secretToRecipient.ts  One old secret to the roster recipient it stan
 src/migrate/descriptorLog.ts      An archived governing log to its encryption descriptor
 src/migrate/generations.ts        The user key generations, a cipher per generation, the index schema
 src/migrate/archiveSurvey.ts      One pass gathering the logs, chunk dirs, generators, and Resource counts
-src/migrate/collectionWalk.ts     One collection's Resources, one at a time, to the sink
+src/migrate/collectionWalk.ts     One collection's Resources, one at a time, to the sink; chunked ones reassembled
 src/migrate/report.ts             The report shape and the per-collection tally
 src/migrate/sink.ts               The sink port, the walk order, and the walk's two limits
 ```
@@ -63,16 +63,25 @@ The dependency direction inside this package is one way: `migrate/` reads
    memory at a time. The walks are one-shot: a caller iterates them once and
    reads an entry's bytes before advancing. The migration walk holds one
    Resource on top of that: it awaits each sink call before it reads the next
-   entry, and it buffers nothing per collection but the small documents
-   `archiveSurvey.ts` gathers (each governing log, each app collection's
-   `generator`, metadata `custom`, and public-read policy, the chunk-directory
-   names, and each collection's Resource count). The writer streams:
-   `writeBundle` returns before its Space entries are written, awaits the pack's
-   drain between entries, and collects at most three Space archives at once (a
-   tar header carries the entry size, so an archive is collected whole before
-   its entry). A consumer that stops reading stops the per-Space exports behind
-   it. A cancel, a failed entry or an abort stops the writer: no further
-   collection starts, and one in flight is released at its next chunk.
+   entry. A chunked Resource in an encrypted app collection is the deliberate
+   exception to "nothing large": it is reassembled and handed over whole, so the
+   per-Resource bound is the largest such Resource the archive carries. Its peak
+   is about two copies of the plaintext plus one chunk, and the chunk files are
+   dropped as they are decrypted. The walk buffers nothing per collection but
+   the small documents `archiveSurvey.ts` gathers (each governing log, each app
+   collection's `generator`, metadata `custom`, and public-read policy, the
+   chunk-directory names, and each collection's Resource count), plus the
+   envelopes of that collection's chunked Resources, a few hundred bytes each.
+   Only an envelope that fails for lack of its chunks while a chunk directory
+   exists for it is held. The chunks of one directory are gathered in a second
+   pass over the archive, which depends on `@interop/space-archive` packing a
+   chunk directory's files together. The writer streams: `writeBundle` returns
+   before its Space entries are written, awaits the pack's drain between
+   entries, and collects at most three Space archives at once (a tar header
+   carries the entry size, so an archive is collected whole before its entry). A
+   consumer that stops reading stops the per-Space exports behind it. A cancel,
+   a failed entry or an abort stops the writer: no further collection starts,
+   and one in flight is released at its next chunk.
 4. **The codecs are isomorphic.** No module under `src/` imports `node:*`, and
    no public type names `Buffer`; bytes are `Uint8Array` and streams arrive as a
    `ByteSource` (`@interop/space-archive`'s type, re-exported here since
@@ -83,7 +92,11 @@ The dependency direction inside this package is one way: `migrate/` reads
    (`streamx`, through `events-universal`) call `require('events')` without
    declaring a package that provides it outside Node. A bundler resolves that
    call to the `events` package declared here. Without it the browser spec fails
-   inside `tar-stream`.
+   inside `tar-stream`. The walk reads a decrypted `Blob` through was-client's
+   `blobBytes` and never calls `blob.arrayBuffer()`, which React Native's `Blob`
+   lacks. A second Playwright spec runs the walk over a chunked Resource, so the
+   `Blob` path runs in Chromium; React Native is covered only by that reading
+   rule.
 5. **A sealed backup credential introduces no cipher context of its own.** It
    seals through wallet-core's record construction under the keyring cipher
    context, with the keyring Argon2id parameters and a fresh per-bundle random
@@ -100,23 +113,28 @@ The dependency direction inside this package is one way: `migrate/` reads
    never rewritten -- a reader finds the account Space archive by matching an
    anchor, and nothing else marks which tar is which.
 7. **The migration walk issues no request, and the package evaluates no
-   transport module.** The walk builds its ciphers without a `spaceId`, so
-   was-client constructs no transport, and it reads every descriptor out of the
-   archive. A bundle migrates with the old account gone and the old server
-   unreachable. The node suites install a `fetch` that throws, so a walk that
-   reached the network would fail rather than pass. The import graph keeps the
-   same promise: the ciphers and epoch primitives come from
-   `@interop/was-client/edv/core`, and every wallet-core derivation and
-   collection name comes from a leaf entry (`keyring/kdf`,
-   `keyring/recordEnvelope`, `keys/userKey`, `keys/userKeyGenerations`,
-   `unlock/standingClient`, `recovery/recoveryCode`, `space/collections`) rather
-   than a module barrel. `test/probe/transportClosure.mjs` imports the built
-   package under a Node resolve hook and fails if any resolved module is a
-   was-client module that talks to a server, was-client's `./edv` or root
-   barrel, or wallet-core's `./space` barrel, `resourceLog/` or `clientAnnex/`.
-   It runs as `pnpm run test:dist`. One reach is allowed by design: the client
-   derivations load `@interop/was-client/identity`, which brings the zcap and
-   HTTP signing packages, wallet-core's own recorded allowance for its leaves.
+   transport module.** The walk builds its ciphers without a `spaceId` and reads
+   every descriptor out of the archive. The only transport its graph reaches is
+   the one was-client builds around the walk's chunk source, which serves chunks
+   from bytes already read from the archive (see
+   `decisions/0003-chunk-reassembly-lives-in-was-client.md`). The walk takes
+   was-client's missing-chunk error by name and never imports it. A bundle
+   migrates with the old account gone and the old server unreachable. The node
+   suites install a `fetch` that throws, so a walk that reached the network
+   would fail rather than pass. The import graph keeps the same promise: the
+   ciphers and epoch primitives come from `@interop/was-client/edv/core`, and
+   every wallet-core derivation and collection name comes from a leaf entry
+   (`keyring/kdf`, `keyring/recordEnvelope`, `keys/userKey`,
+   `keys/userKeyGenerations`, `unlock/standingClient`, `recovery/recoveryCode`,
+   `space/collections`) rather than a module barrel.
+   `test/probe/transportClosure.mjs` imports the built package under a Node
+   resolve hook and fails if any resolved module is a was-client module that
+   talks to a server, was-client's `./edv` or root barrel, edv-client's root
+   barrel or `HttpsTransport`, or wallet-core's `./space` barrel, `resourceLog/`
+   or `clientAnnex/`. It runs as `pnpm run test:dist`. One reach is allowed by
+   design: the client derivations load `@interop/was-client/identity`, which
+   brings the zcap and HTTP signing packages, wallet-core's own recorded
+   allowance for its leaves.
 8. **Key material does not outlive the walk, as far as it can be scrubbed.**
    `migrateBundle` zeroes every recovered generation's raw `secret` and every
    derived unlock seed in a `finally`, so an abort and a refusal drop them as an
@@ -130,7 +148,9 @@ The dependency direction inside this package is one way: `migrate/` reads
    `userKeyVaultKeys` and the client derivations return -- carry their private
    half as an immutable `privateKeyMultibase` string, which no code can scrub.
    Those are dropped when the walk ends and reclaimed by garbage collection, on
-   the collector's schedule rather than the walk's.
+   the collector's schedule rather than the walk's. The same holds for the
+   content-encryption keys minimal-cipher unwraps and does not zero: one per
+   Resource, and one per chunk of a chunked Resource.
 9. **An export establishes the backup credential before it reads the Space
    list.** `exportBundle` runs the ceremony in one order: establish the
    credential through the host's own establishment port, then list the Spaces,
@@ -149,9 +169,14 @@ The dependency direction inside this package is one way: `migrate/` reads
     `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
     raised before any Resource reaches a sink. Past that point every failure is
     a number in the report -- an unreadable collection log, a Resource no
-    generation opens, an app collection the host could not ensure, a write that
-    did not land -- except a sink throw named `QuotaExceededError`, which ends
-    the walk and is named in `stoppedAt`.
+    generation opens, a chunked Resource that does not reassemble, a stray chunk
+    directory, an app collection the host could not ensure, a write that did not
+    land -- except a sink throw named `QuotaExceededError`, which ends the walk
+    and is named in `stoppedAt`. Every step before the sink call (the envelope
+    parse, the chunk source, the decrypt, the `Blob` read) sits inside the
+    per-Resource open catch, which counts a throw under its name and rethrows
+    only an abort, as the signal's reason. The sink call keeps its own catch, so
+    a quota refusal still ends the walk.
 
 ## Ownership heuristics
 
@@ -160,6 +185,10 @@ The dependency direction inside this package is one way: `migrate/` reads
   the entry trees out of its own storage backends. A change to it is a change to
   both, and to this package as a consumer of the reader and writer. See that
   package's AGENTS.md for its own parties table.
+- Chunk reassembly and its checks (the sealed count, the bound id, each chunk's
+  binding) belong to `@interop/was-client`. The walk hands it a chunk source
+  over the archive's chunk files and does nothing else with their bytes. See
+  `decisions/0003-chunk-reassembly-lives-in-was-client.md`.
 - Key derivation, record sealing, roster and epoch handling belong to
   `@interop/wallet-core` and `@interop/was-client`. This package calls them; it
   does not re-derive a KDF, a cipher, or an envelope shape. Both are peer
@@ -246,14 +275,14 @@ The dependency direction inside this package is one way: `migrate/` reads
   sink in one call, and the report counts it under one outcome. A chunked
   Resource is one Resource however many chunk files the archive holds for it.
   Write "migrating Resource" only where a Resource on the server must be told
-  apart from one in the walk. Its decrypted payload is `json` when it parses as
-  JSON and `bytes` otherwise. Avoid: row, record, item, document (EDV's word for
-  the encrypted envelope). The host's "activity row" is the host's own term and
-  is unaffected.
+  apart from one in the walk. Its payload is `json` when it decrypts to (or, in
+  a plaintext collection, is typed as) JSON, and `bytes` otherwise. Avoid: row,
+  record, item, document (EDV's word for the encrypted envelope). The host's
+  "activity row" is the host's own term and is unaffected.
 
 ## Current State labels
 
-- Transitional: `@interop/space-archive` is consumed through a local
-  `link:../space-archive` reference until its 0.3.0 release, which carries
-  `collectionMetadataFromFile`. Every other `@interop/*` dependency is consumed
-  from the npm registry.
+- Transitional: the `@interop/was-client` devDependency is a local
+  `link:../was-client` reference until its 0.80.0 release, which carries the
+  `chunkSource` option and the `blobBytes` export. Every other `@interop/*`
+  dependency is consumed from the npm registry.

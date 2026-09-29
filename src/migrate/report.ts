@@ -16,9 +16,9 @@ import type { SinkOutcome } from './sink.js'
 
 /**
  * One collection's counts. `unopenable` Resources never reached the sink: no
- * held user key generation opened them, the Resource is chunked, or the
- * collection was stopped before its first Resource (its `stoppedBy` then names
- * the cause). `unopenableCauses` names why, by error name, with the number of
+ * held user key generation opened them, a chunked Resource could not be
+ * reassembled or is not opened where it sits, or the collection was stopped
+ * before its first Resource (its `stoppedBy` then names the cause). `unopenableCauses` names why, by error name, with the number of
  * Resources each name accounts for. `stoppedBy` is present only when a run of
  * consecutive failures ended the collection, carrying the last cause's name (or
  * the outcome word `failed` when the sink reported failure without throwing),

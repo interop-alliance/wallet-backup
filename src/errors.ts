@@ -56,9 +56,12 @@ export class CollectionLogUnreadableError extends Error {
 }
 
 /**
- * A Resource is stored in chunks, which the migration walk does not open.
- * Reported as that one Resource's cause; the rest of the collection is
- * migrated.
+ * A Resource is stored in chunks outside an encrypted app collection: in a
+ * plaintext app collection, where no chunk framing is defined, or in a
+ * standard collection, whose import functions take parsed JSON. The migration
+ * walk does not open it. Reported as that one Resource's cause; the rest of
+ * the collection is migrated. A chunked Resource in an encrypted app
+ * collection is reassembled instead.
  */
 export class ChunkedResourceUnsupportedError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

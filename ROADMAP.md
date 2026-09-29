@@ -23,42 +23,52 @@ conventions live in [AGENTS.md](AGENTS.md) under "Roadmap & Task Conventions".
 
 ### WBU-6: Migrate chunked Resources instead of refusing them
 
-- status: todo
+- status: in-progress
 - priority: medium
 - labels: migrate, chunks, encryption
-- design: designs/WBU-6-chunked-resources.md (reviewed 2026-09-28; open
-  questions Q1 and Q2 await core contributors)
-- design-approved:
+- design: designs/WBU-6-chunked-resources.md (reviewed 2026-09-28; Q1, Q2 and
+  the option name settled 2026-09-28)
+- design-approved: 2026-09-28
 - touches:
-  - [ ] wallet-backup: `src/migrate/collectionWalk.ts`,
+  - [x] wallet-backup: `src/migrate/collectionWalk.ts`,
         `src/migrate/migrateBundle.ts`, the sink port's documented Resource
-        meaning, and the narrowing of `ChunkedResourceUnsupportedError`
-  - [ ] wallet-backup: `package.json` was-client devDependency and peer range
+        meaning, and the narrowing of `ChunkedResourceUnsupportedError` --
+        shipped: the two-pass walk with a chunk source per chunk directory,
+        result-type routing (`Blob` to `bytes` under its sealed type),
+        `openChunked` for encrypted app collections only, and the `sink.ts`,
+        `report.ts` and `errors.ts` JSDoc
+  - [x] wallet-backup: `package.json` was-client devDependency and peer range
         move to the release carrying the chunk source;
         `test/probe/transportClosure.mjs` forbids the edv-client root and
-        `HttpsTransport`; README and `sink.ts` Resource-shape text
-  - [ ] wallet-backup ARCHITECTURE.md (invariants 3, 7 and 8) and AGENTS.md (the
-        sink port change is a walk of the parties table); decision 0002
-        superseded with the bytes-Resource identity rule
-  - [ ] was-client: let the cipher's `decrypt` take a caller-supplied chunk
-        source in place of a request context (`src/edv/docCipher.ts`,
+        `HttpsTransport`; README and `sink.ts` Resource-shape text -- shipped:
+        peer range `>=0.80.0`, the devDependency on `link:../was-client` until
+        0.80.0 publishes, the two probe entries, README and `sink.ts` text
+  - [x] wallet-backup ARCHITECTURE.md (invariants 3, 7 and 8) and AGENTS.md (the
+        sink port change is a walk of the parties table); decision 0002 amended
+        with the bytes-Resource identity rule (done 2026-09-28), and 0003
+        recording chunk reassembly in was-client (done 2026-09-28) -- shipped:
+        ARCHITECTURE.md invariants 3, 4, 7, 8 and 10, an ownership heuristic
+        citing 0003, and the Current State label for the was-client link.
+        AGENTS.md text is unchanged; the parties-table walk is the freewallet
+        and dcw entries below
+  - [ ] was-client: let the cipher's `decrypt` take a caller-supplied
+        `chunkSource` in place of a request context (`src/edv/docCipher.ts`,
         `src/edv/EdvCodec.ts`), a read-side chunk-binding check, `blobBytes`
         exported from `./edv/core`, a quota error that keeps its name through
-        `#chunkedWriteFailed`, and possibly a write-by-id path for chunked plans
-        (design Q1), plus its ARCHITECTURE/AGENTS files
-  - [ ] freewallet: `importAppCollectionRow` accepts a `bytes` Resource for an
-        encrypted collection (write route per design Q1),
-        `snapshotAppCollection` sees held chunked Resources,
-        `wasRemoteStore.ts`, `contentMigrationCauseKey.ts` and the en/es cause
-        strings, plus its ARCHITECTURE/AGENTS files
+        `#chunkedWriteFailed`, and a write-by-id path for chunked plans (design
+        Q1), plus its ARCHITECTURE/AGENTS files
+  - [ ] freewallet: `importAppCollectionResource` accepts a `bytes` Resource for
+        an encrypted collection, written at its archived id (design Q1), with
+        pending-stub reaping, `snapshotAppCollection` records held bytes
+        Resources by id, `wasRemoteStore.ts`, `contentMigrationCauseKey.ts` and
+        the en/es cause strings, plus its ARCHITECTURE/AGENTS files
   - [ ] dcw: no sink over `appCollections` yet (DCW-80 covers the standard
         imports only); record the requirement there, plus its
         ARCHITECTURE/AGENTS files
   - [ ] space-archive: state that a chunk directory's files are packed together,
         in its ARCHITECTURE.md
   - [ ] portable-wallet-profile-spec: the per-Space archive's entry order states
-        chunk directory contiguity, or resolve as unaffected if the walk
-        tolerates a split directory (design Q2)
+        chunk directory contiguity (design Q2)
   - [ ] was-teaching-server: both backends already pack chunk directories
         contiguously; confirm and resolve as unaffected
   - [ ] was-react and was-sync: the option stays off the shared `DocCipher`
@@ -66,18 +76,18 @@ conventions live in [AGENTS.md](AGENTS.md) under "Roadmap & Task Conventions".
   - [ ] encrypted-collections-spec: confirm the chunked envelope needs no change
         for archive-local reassembly, or resolve as unaffected
 - acceptance:
-  - [ ] An approved design doc settles where reassembly happens (the walk, the
+  - [x] An approved design doc settles where reassembly happens (the walk, the
         cipher, or the sink) and how it keeps invariant 3.
-  - [ ] A chunked Resource in an encrypted collection migrates through the sink
+  - [x] A chunked Resource in an encrypted collection migrates through the sink
         and is counted as imported, not as unopenable.
-  - [ ] A chunked Resource in a plaintext app collection or a standard
+  - [x] A chunked Resource in a plaintext app collection or a standard
         collection stays refused under `ChunkedResourceUnsupportedError`, since
         only the encrypted chunked envelope has a defined reassembly.
-  - [ ] A chunked Resource whose chunks are missing or unreadable is reported by
+  - [x] A chunked Resource whose chunks are missing or unreadable is reported by
         a named cause, and the rest of the collection still migrates.
-  - [ ] Node suite covers the design doc's test plan, and the tests at
+  - [x] Node suite covers the design doc's test plan, and the tests at
         `test/node/migrate.test.ts` that expect the refusal are split.
-  - [ ] CHANGELOG entry, and README and ARCHITECTURE updated.
+  - [x] CHANGELOG entry, and README and ARCHITECTURE updated.
 
 Context: a backup bundle carries chunked Resources. The export copies each Space
 archive verbatim, and the archive keeps a chunked Resource's chunk files in
@@ -130,26 +140,29 @@ reach every sink in the parties table.
 - status: todo
 - priority: high
 - labels: migrate, encryption, bug
-- blocked-by: WBU-6 (only its design's Q1 answer, the bytes-Resource identity
-  rule)
 - touches:
-  - [ ] wallet-backup: `src/migrate/collectionWalk.ts` routes a `Blob` decrypt
+  - [x] wallet-backup: `src/migrate/collectionWalk.ts` routes a `Blob` decrypt
         result as `bytes` under `blob.type`; `sink.ts` and README Resource-shape
-        text; CHANGELOG names the sink port change as breaking
-  - [ ] wallet-backup ARCHITECTURE.md and AGENTS.md (a walk of the parties
-        table)
+        text; CHANGELOG names the sink port change as breaking -- shipped with
+        WBU-6's walk (0.5.0)
+  - [x] wallet-backup ARCHITECTURE.md and AGENTS.md (a walk of the parties
+        table) -- shipped: the Glossary's Resource entry and invariant 4's
+        `blobBytes` rule. AGENTS.md text is unchanged; the parties-table walk is
+        the freewallet and dcw entries below
   - [ ] was-client: export `blobBytes` from `./edv/core`
-  - [ ] freewallet: `importAppCollectionRow` accepts a `bytes` Resource for an
-        encrypted collection, with a content identity for it; the
+  - [ ] freewallet: `importAppCollectionResource` accepts a `bytes` Resource for
+        an encrypted collection, with a content identity for it; the
         `decryptEnvelope` and `recordEnvelope.ts` comments, plus its
         ARCHITECTURE/AGENTS files
   - [ ] dcw: record the requirement for its future `appCollections` sink
 - acceptance:
-  - [ ] An encrypted app-collection Resource that decrypts to a `Blob` reaches
+  - [x] An encrypted app-collection Resource that decrypts to a `Blob` reaches
         the sink as `bytes` under its sealed content type.
-  - [ ] Two different small encrypted images in one collection both migrate.
-  - [ ] Node suite covers both, and a re-run of each is `skipped`.
-  - [ ] CHANGELOG entry, and README and ARCHITECTURE updated.
+  - [x] Two different small encrypted images in one collection both migrate.
+  - [ ] Node suite covers both, and a re-run of each is `skipped`. (The
+        wallet-backup suite covers both; a re-run's `skipped` is the freewallet
+        sink's test.)
+  - [x] CHANGELOG entry, and README and ARCHITECTURE updated.
 
 Context: an encrypted Resource under 512 KiB whose payload is binary or text
 decrypts to a `Blob`, not JSON. The migration walk hands whatever the cipher
@@ -167,49 +180,6 @@ same open question as WBU-6's Q1, and needs core-contributor sign-off before it
 is coded. WBU-6's design restates this fix so it does not depend on WBU-7
 landing first. WBU-7 waits only on the Q1 answer, not on WBU-6's implementation.
 
-### WBU-8: Rename the sink port's "row" vocabulary to Resource
-
-- status: done (2026-09-28)
-- priority: high
-- labels: migrate, sink, naming
-- touches:
-  - [x] wallet-backup: `src/migrate/sink.ts` (`AppCollectionRow` to
-        `AppCollectionResource`, `importRow` to `importResource`, the `row`
-        payload field to `json` on every sink method), and the walk's internal
-        names (`RowCipher`, `OpenedRow`, `readRow`, `openRow`, `walkedRows`);
-        README; CHANGELOG names the sink port change as breaking. Shipped: all
-        renamed, "row" prose in `src/` and the tests reworded, README example
-        and prose updated, breaking entry under 0.5.0.
-  - [x] wallet-backup ARCHITECTURE.md (prose outside the Glossary) and AGENTS.md
-        (a walk of the parties table). Shipped: ARCHITECTURE.md layer map,
-        invariants 3 and 10, and the EDV contract paragraph. AGENTS.md
-        unaffected (the parties table names only freewallet's own "import
-        activity row").
-  - [x] freewallet: `src/session/contentMigration.ts` (the sink), the
-        `importAppCollectionRow` import function and its tests, plus its
-        ARCHITECTURE/AGENTS files. Shipped: the sink and
-        `importAppCollectionResource` with its tests, ARCHITECTURE.md, and
-        `docs/architecture/session-persistence.md`; AGENTS.md unaffected (no old
-        names); CHANGELOG entry under 0.44.0.
-  - [x] dcw: no sink over the port yet; record the new names on DCW-80. Shipped:
-        DCW-80's prose names the 0.5.0 port shape.
-- acceptance:
-  - [x] No identifier, JSDoc or README text in `src/migrate/` uses "row" for the
-        migrated unit or its payload.
-  - [x] Every sink method's JSON payload field is `json`; app collections take
-        `{ json }` or `{ bytes }`.
-  - [x] Node suite green under the new names.
-  - [x] CHANGELOG entry, and README and ARCHITECTURE updated.
-
-Context: the migration code calls the unit it migrates a "row" and also names
-the parsed JSON payload field `row`. The two meanings collide exactly where the
-sink contract distinguishes `{ row }` from `{ bytes }`, which makes WBU-6 and
-WBU-7 hard to state. The Glossary now names the unit a Resource (the WAS spec's
-word for the same thing) and the JSON payload `json`, with "row" on the avoid
-list. The code and the rest of the docs still use the old names.
-
-discovered-from: WBU-6, in its design review (2026-09-28). The names were signed
-off by the user on 2026-09-28. Decision records keep their wording, since
-records are superseded rather than rewritten. The host's "activity row" is
-freewallet's own term and is out of scope. Landing this before WBU-6 and WBU-7
-lets both be written against the new names.
+Q1 was settled 2026-09-28: a bytes Resource in an encrypted collection is
+written at its archived `resourceId`, and that id is its identity. WBU-7 shares
+WBU-6's was-client write-by-id path.

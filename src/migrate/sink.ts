@@ -6,7 +6,7 @@
  * decrypts a Resource and hands it to the sink method of the collection it came
  * from; the sink writes it into the host's own stores and says what happened.
  * The package knows no wallet data types, so the plaintext Resource travels as
- * opaque JSON.
+ * opaque JSON, or as opaque bytes where it is not JSON.
  *
  * The walk order and the collection-to-method mapping live here too, since
  * they are one decision: which collections migrate, in which order, through
@@ -40,12 +40,20 @@ import type { CollectionGenerator, IndexSchema } from '@interop/was-client'
 export type SinkOutcome = 'accepted' | 'skipped' | 'conflicting' | 'failed'
 
 /**
- * One app collection Resource as `importResource` receives it. `contentType` is
- * the archived representation's content type, and an encrypted collection's
- * decrypted Resource is always `application/json`. A JSON type, by
- * storage-core's `isJsonContentType` (`application/json` or an
- * `application/...+json` type), arrives parsed as `json`; any other arrives as
- * the archived `bytes`, unparsed.
+ * One app collection Resource as `importResource` receives it.
+ *
+ * An encrypted collection's Resource arrives by what it decrypts to. JSON
+ * arrives as `json`, under `application/json`. Binary or text content arrives
+ * as `bytes`, under its sealed content type as the platform's `Blob` reports it
+ * (`application/octet-stream` when that is empty). That covers a small binary
+ * Resource and a chunked one alike, and a chunked Resource whose sealed type is
+ * `application/json` still arrives as `bytes`. The sealed type is an opaque
+ * label chosen by whoever built the bundle.
+ *
+ * A plaintext collection's `contentType` is the archived representation's
+ * content type. A JSON type, by storage-core's `isJsonContentType`
+ * (`application/json` or an `application/...+json` type), arrives parsed as
+ * `json`; any other arrives as the archived `bytes`, unparsed.
  */
 export type AppCollectionResource = {
   collectionId: string
@@ -76,8 +84,9 @@ export type AppCollectionResource = {
  * to the old account's keys, and when the metadata carries none. A throw from
  * it stops that collection, and a throw named `QuotaExceededError` stops the
  * whole walk. `importResource` follows the same outcome and throw rules as the
- * four standard methods. An encrypted collection's Resource arrives decrypted;
- * a plaintext one's arrives parsed as JSON or as raw bytes, by its content type
+ * four standard methods. An encrypted collection's Resource arrives decrypted,
+ * as JSON or as bytes by what it decrypts to, a chunked one reassembled; a
+ * plaintext one's arrives parsed as JSON or as raw bytes, by its content type
  * (see `AppCollectionResource`). Either way it keeps its archived `resourceId`.
  * A sink without the member leaves every app collection's Resources counted in
  * `notMigrated`.

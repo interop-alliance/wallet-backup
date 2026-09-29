@@ -70,7 +70,9 @@ pushes them one at a time at a sink you supply. With the optional
 `appCollections` member, the sink also takes the app collections: every
 collection outside the wallet Space's own layout, encrypted or plaintext. It
 issues no HTTP request and holds no collection in memory; each sink call is
-awaited before the next Resource is decrypted.
+awaited before the next Resource is decrypted. A chunked Resource in an
+encrypted app collection is reassembled from the archive's chunk files and
+handed over whole.
 
 ```js
 import { migrateBundle } from '@interop/wallet-backup'
@@ -106,7 +108,7 @@ const sink = {
       })
     },
     async importResource(options) {
-      // `json` for a JSON content type, `bytes` for any other
+      // `json` for a JSON payload, `bytes` for any other
       return store.putResource(options)
     }
   }
@@ -155,11 +157,17 @@ before its first Resource, this way or for a missing log, counts its Resources
 as `unopenable` under the stopping cause. A throw named `QuotaExceededError`
 ends the whole walk. `importResource` follows the rules above. It receives
 `{ collectionId, resourceId, contentType }` plus the Resource's payload. An
-encrypted collection's Resource arrives decrypted as `json`, under
-`application/json`. A plaintext one's arrives as `json`, parsed, when its
-content type is `application/json` or an `application/...+json` type, and as raw
-`bytes` otherwise. Both keep their archived `resourceId`. `app-connections` is
-part of the wallet layout and is not migrated yet.
+encrypted collection's Resource arrives decrypted. It is `json`, under
+`application/json`, when it decrypts to JSON. It is `bytes`, under its sealed
+content type (`application/octet-stream` when none was sealed), when it decrypts
+to binary or text. That covers a small binary Resource and a chunked one alike.
+A chunked Resource whose sealed type is `application/json` still arrives as
+`bytes`. A plaintext one's arrives as `json`, parsed, when its content type is
+`application/json` or an `application/...+json` type, and as raw `bytes`
+otherwise. Both keep their archived `resourceId`. A chunked Resource in a
+plaintext app collection or a standard collection is not opened. It counts as
+`unopenable` under `ChunkedResourceUnsupportedError`. `app-connections` is part
+of the wallet layout and is not migrated yet.
 
 The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 `{ packedCredential: { exportPassphrase } }`. The last reads the bundle's own

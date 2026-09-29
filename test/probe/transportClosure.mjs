@@ -9,9 +9,10 @@
  * graph beside it. This script imports the built package entry under a Node
  * resolve hook, records every module Node actually resolves, and fails when
  * one of them is a was-client module that talks to a server, was-client's
- * `./edv` or root barrel, or a wallet-core module past the offline leaves. It
- * runs against `dist/`, as part of `pnpm run test:dist`, so it also sees what
- * a dependency package loads on its own.
+ * `./edv` or root barrel, edv-client's root barrel or its HTTPS transport, or
+ * a wallet-core module past the offline leaves. It runs against `dist/`, as
+ * part of `pnpm run test:dist`, so it also sees what a dependency package
+ * loads on its own.
  *
  * Known allowance: the standing client and recovery client derivations load
  * `@interop/was-client/identity`, which brings `@interop/ezcap`,
@@ -31,6 +32,8 @@ const FORBIDDEN_MODULES = [
   '/was-client/dist/edv/index.js',
   '/was-client/dist/edv/WasTransport.js',
   '/was-client/dist/edv/transportFactory.js',
+  '/edv-client/dist/index.js',
+  '/edv-client/dist/HttpsTransport.js',
   '/wallet-core/dist/index.js',
   '/wallet-core/dist/space/index.js',
   '/wallet-core/dist/space/provisioning.js',

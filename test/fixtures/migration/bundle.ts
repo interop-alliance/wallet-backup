@@ -24,7 +24,13 @@ import {
 } from '@interop/was-client/edv/core'
 import type { RecipientPublicKey } from '@interop/was-client/edv/core'
 import { createEdvEncryption } from '@interop/was-client/edv'
-import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
+import type {
+  ChunkedWrite,
+  CodecRequestContext,
+  CollectionEncryption,
+  EncodedWrite,
+  IndexSchema
+} from '@interop/was-client'
 import {
   mintUserKey,
   userKeyVaultKeys
@@ -381,7 +387,172 @@ export function plaintextResources(resources: unknown[]): ArchiveFile[] {
 }
 
 /**
- * A chunk directory, which the walk refuses to open.
+ * One binary Resource sealed by was-client's own write path, as the archive
+ * carries it: the envelope's representation file and, for a chunked write,
+ * one chunk file per chunk in index order.
+ */
+export type SealedBinary = {
+  id: string
+  representation: BytesFile
+  chunks: BytesFile[]
+}
+
+/**
+ * An archive file whose bytes are in hand.
+ */
+export type BytesFile = { name: string; bytes: Uint8Array }
+
+/**
+ * Seals binary Resources through was-client's EDV codec, over an in-memory
+ * request context standing in for the server. A payload over `maxBlobBytes`
+ * takes the codec's own chunked write, so the envelope and every chunk are
+ * genuine: the sealed count, each chunk's `was` binding and its index-bound
+ * AAD are the writer's, not rebuilt here. The context never reaches the
+ * network.
+ *
+ * @param options {object}
+ * @param options.collectionId {string}
+ * @param options.encryption {CollectionEncryption}   sealed under its current
+ *   epoch
+ * @param options.generation {Generation}   a generation that opens that epoch
+ * @param options.resources {Array<object>}   each `{ data, contentType, id? }`;
+ *   an `id` writes at that id instead of a fresh one
+ * @param [options.maxBlobBytes] {number}   the single-document threshold
+ * @param [options.chunkSize] {number}   the plaintext bytes per chunk
+ * @param [options.tearChunksFrom] {number}   fails every chunk write from
+ *   this index on, and the cleanup delete, leaving the pending stub and the
+ *   partial chunks a killed write leaves
+ * @returns {Promise<SealedBinary[]>}
+ */
+export async function sealBinaryResources({
+  collectionId,
+  encryption,
+  generation,
+  resources,
+  maxBlobBytes = 16,
+  chunkSize = 24,
+  tearChunksFrom
+}: {
+  collectionId: string
+  encryption: CollectionEncryption
+  generation: Generation
+  resources: Array<{ data: Uint8Array; contentType: string; id?: string }>
+  maxBlobBytes?: number
+  chunkSize?: number
+  tearChunksFrom?: number
+}): Promise<SealedBinary[]> {
+  const codec = await createEdvEncryption({
+    resolveKeys: async () => userKeyVaultKeys({ userKey: generation }),
+    maxBlobBytes,
+    chunkSize
+  }).codecFor({
+    spaceId: FIXTURE_SPACE_ID,
+    collectionId,
+    scheme: 'edv',
+    encryption
+  })
+  if (!codec) {
+    throw new Error('expected an EDV codec')
+  }
+  const store = new Map<string, Uint8Array>()
+  const context: CodecRequestContext = {
+    async request(input) {
+      const path = input.path as string
+      const method = input.method ?? 'GET'
+      const chunkIndex = path.includes('/chunks/')
+        ? Number(path.slice(path.lastIndexOf('/') + 1))
+        : undefined
+      if (
+        tearChunksFrom !== undefined &&
+        ((method === 'PUT' &&
+          chunkIndex !== undefined &&
+          chunkIndex >= tearChunksFrom) ||
+          method === 'DELETE')
+      ) {
+        throw Object.assign(new Error('HTTP 500'), { status: 500 })
+      }
+      if (method === 'PUT') {
+        store.set(path, input.body as Uint8Array)
+      } else if (method === 'DELETE') {
+        store.delete(path)
+      } else {
+        throw Object.assign(new Error(`HTTP 404 ${path}`), { status: 404 })
+      }
+      return {
+        headers: {
+          get: (name: string) => (name.toLowerCase() === 'etag' ? '"v1"' : null)
+        }
+      } as unknown as Awaited<ReturnType<CodecRequestContext['request']>>
+    }
+  }
+  const sealed: SealedBinary[] = []
+  for (const { data, contentType, id } of resources) {
+    const write = (await codec.encode({
+      data,
+      contentType,
+      ...(id !== undefined && { id })
+    })) as EncodedWrite | ChunkedWrite
+    if (!('chunked' in write)) {
+      sealed.push({
+        id: write.id!,
+        representation: {
+          name: fileNameFor({
+            resourceId: write.id!,
+            contentType: 'application/json'
+          }),
+          bytes: new TextEncoder().encode(JSON.stringify(write.envelope))
+        },
+        chunks: []
+      })
+      continue
+    }
+    await write.execute(context).catch(() => undefined)
+    const prefix = `/space/${FIXTURE_SPACE_ID}/${collectionId}/${write.id}`
+    const chunks: BytesFile[] = []
+    for (let index = 0; store.has(`${prefix}/chunks/${index}`); index += 1) {
+      chunks.push({
+        name: fileNameFor({
+          resourceId: String(index),
+          contentType: 'application/octet-stream'
+        }),
+        bytes: store.get(`${prefix}/chunks/${index}`)!
+      })
+    }
+    sealed.push({
+      id: write.id,
+      representation: {
+        name: fileNameFor({
+          resourceId: write.id,
+          contentType: 'application/json'
+        }),
+        bytes: store.get(prefix)!
+      },
+      chunks
+    })
+  }
+  return sealed
+}
+
+/**
+ * A chunk directory holding the given files verbatim.
+ * @param options {object}
+ * @param options.resourceId {string}
+ * @param options.files {ArchiveFile[]}
+ * @returns {ArchiveEntry}
+ */
+export function chunkDirWith({
+  resourceId,
+  files
+}: {
+  resourceId: string
+  files: ArchiveFile[]
+}): ArchiveEntry {
+  return { name: chunkDirName(resourceId), files }
+}
+
+/**
+ * A chunk directory whose one file is not a chunk the layout names, beside no
+ * envelope.
  * @param resourceId {string}
  * @returns {ArchiveEntry}
  */

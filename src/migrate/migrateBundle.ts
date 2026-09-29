@@ -110,7 +110,7 @@ function walkSteps({
     }
     steps.push({
       collectionId,
-      // A standard collection is encrypted, so its Resources always arrive
+      // A standard collection's Resources are small JSON, so they arrive
       // parsed.
       importResource: ({ resourceId, ...body }) =>
         sink[method]({
@@ -132,8 +132,9 @@ function walkSteps({
  * @param options.secret {MigrationSecret}   the old account's unlock
  *   passphrase, its recovery code, or the backup credential the bundle carries
  * @param options.sink {MigrationSink}   the host's import functions
- * @param [options.signal] {AbortSignal}   checked between Resources and before
- *   each collection is entered; the walk throws its `reason`
+ * @param [options.signal] {AbortSignal}   checked between Resources, on every
+ *   chunk read, and before each collection is entered; the walk throws its
+ *   `reason`
  * @param [options.onProgress] {function}   called once per Resource with
  *   `{ collectionId, index, outcome }`
  * @returns {Promise<MigrationReport>}
@@ -289,6 +290,9 @@ export async function migrateBundle({
         importResource,
         ciphers,
         chunked: survey.chunked.get(collectionId) ?? new Set(),
+        // Only an encrypted app collection's chunked Resources are
+        // reassembled; the chunk framing is the encrypted envelope's.
+        openChunked: app !== undefined && encrypted,
         tally,
         signal,
         onProgress
