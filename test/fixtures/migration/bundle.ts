@@ -286,33 +286,33 @@ export function collectionLogFile({
 }
 
 /**
- * Encrypts rows into a collection's archive files, under the descriptor's
+ * Encrypts Resources into a collection's archive files, under the descriptor's
  * current epoch. Each file is named with the id the cipher derived, which is
  * the id the envelope is bound to.
  *
  * @param options {object}
  * @param options.collectionId {string}
  * @param options.encryption {CollectionEncryption}
- * @param options.rows {unknown[]}
+ * @param options.resources {unknown[]}
  * @returns {Promise<ArchiveFile[]>}
  */
-export async function encryptRows({
+export async function encryptResources({
   collectionId,
   encryption,
-  rows
+  resources
 }: {
   collectionId: string
   encryption: CollectionEncryption
-  rows: unknown[]
+  resources: unknown[]
 }): Promise<ArchiveFile[]> {
   const cipher = await createEdvEncryptOnlyDocCipher({
     collectionId,
     encryption
   })
   const files: ArchiveFile[] = []
-  for (const row of rows) {
+  for (const resource of resources) {
     const { id, envelope } = await cipher.encrypt({
-      data: row as Parameters<typeof cipher.encrypt>[0]['data']
+      data: resource as Parameters<typeof cipher.encrypt>[0]['data']
     })
     files.push(
       jsonFile({
@@ -363,19 +363,19 @@ export function collectionDir({
 }
 
 /**
- * A plaintext collection's rows, one JSON file each, under the resource ids
- * `row-0`, `row-1`, and so on.
- * @param rows {unknown[]}
+ * A plaintext collection's Resources, one JSON file each, under the Resource
+ * ids `resource-0`, `resource-1`, and so on.
+ * @param resources {unknown[]}
  * @returns {ArchiveFile[]}
  */
-export function plaintextRows(rows: unknown[]): ArchiveFile[] {
-  return rows.map((row, index) =>
+export function plaintextResources(resources: unknown[]): ArchiveFile[] {
+  return resources.map((resource, index) =>
     jsonFile({
       name: fileNameFor({
-        resourceId: `row-${index}`,
+        resourceId: `resource-${index}`,
         contentType: 'application/json'
       }),
-      document: row
+      document: resource
     })
   )
 }
@@ -393,7 +393,7 @@ export function chunkDir(resourceId: string): ArchiveEntry {
 }
 
 /**
- * The `key-map` collection directory, holding the user key roster resource.
+ * The `key-map` collection directory, holding the user key roster Resource.
  * @param body {string}   the roster log's JSON Lines
  * @returns {ArchiveEntry}
  */

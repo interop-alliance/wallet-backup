@@ -1,5 +1,15 @@
 # @interop/wallet-backup Changelog
 
+## 0.5.0 - TBD
+
+### Changed
+
+- BREAKING: the sink port names the migrated unit a Resource. `AppCollectionRow`
+  is now `AppCollectionResource`, and `appCollections.importRow` is now
+  `appCollections.importResource`. The parsed JSON payload field is `json` (was
+  `row`) on every sink method, so app collections take `{ json }` or
+  `{ bytes }`.
+
 ## 0.4.3 - 2026-09-28
 
 ### Fixed

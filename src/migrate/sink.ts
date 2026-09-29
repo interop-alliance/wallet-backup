@@ -3,9 +3,9 @@
  */
 /**
  * The sink port: the one wallet-specific seam of the migration walk. The walk
- * decrypts a row and hands it to the sink method of the collection it came
+ * decrypts a Resource and hands it to the sink method of the collection it came
  * from; the sink writes it into the host's own stores and says what happened.
- * The package knows no wallet row types, so the plaintext row travels as
+ * The package knows no wallet data types, so the plaintext Resource travels as
  * opaque JSON.
  *
  * The walk order and the collection-to-method mapping live here too, since
@@ -31,77 +31,77 @@ import {
 import type { CollectionGenerator, IndexSchema } from '@interop/was-client'
 
 /**
- * What one sink call did with the row it was handed. `skipped` is the merge
- * rule's "the account already holds this row"; `conflicting` is "it holds that
- * identity under different content, and the archived row landed nowhere";
- * `failed` is a write that did not land and may be retried on a re-run.
+ * What one sink call did with the Resource it was handed. `skipped` is the
+ * merge rule's "the account already holds this Resource"; `conflicting` is "it
+ * holds that identity under different content, and the archived Resource landed
+ * nowhere"; `failed` is a write that did not land and may be retried on a
+ * re-run.
  */
 export type SinkOutcome = 'accepted' | 'skipped' | 'conflicting' | 'failed'
 
 /**
- * One app collection row as `importRow` receives it. `contentType` is the
- * archived representation's content type, and an encrypted collection's
- * decrypted row is always `application/json`. A JSON type, by storage-core's
- * `isJsonContentType` (`application/json` or an `application/...+json` type),
- * arrives parsed as `row`; any other arrives as the archived `bytes`, unparsed.
+ * One app collection Resource as `importResource` receives it. `contentType` is
+ * the archived representation's content type, and an encrypted collection's
+ * decrypted Resource is always `application/json`. A JSON type, by
+ * storage-core's `isJsonContentType` (`application/json` or an
+ * `application/...+json` type), arrives parsed as `json`; any other arrives as
+ * the archived `bytes`, unparsed.
  */
-export type AppCollectionRow = {
+export type AppCollectionResource = {
   collectionId: string
   resourceId: string
   contentType: string
-} & ({ row: unknown } | { bytes: Uint8Array })
+} & ({ json: unknown } | { bytes: Uint8Array })
 
 /**
  * One import function per migrated standard collection. Each takes one
- * decrypted row and reports its outcome. A method that throws is a `failed`
- * row whose cause name the report keeps -- except a throw named
- * `QuotaExceededError`, which stops the whole walk.
+ * decrypted Resource, parsed as `json`, and reports its outcome. A method that
+ * throws is a `failed` Resource whose cause name the report keeps -- except a
+ * throw named `QuotaExceededError`, which stops the whole walk.
  *
- * `appCollections` is optional. A sink that carries it migrates app
- * collections too. `ensureCollection` is called once per app collection,
- * before its first row is opened. `encrypted` says whether the collection is
- * client-side encrypted, so the host creates the same kind: its archived
- * Collection Metadata declares `encryption`, or it carries a governing
- * collection log. An encrypted collection with no log is stopped before
- * `ensureCollection` under `CollectionLogUnreadableError`.
- * `isPublic` is `true` when the archived collection policy is `PublicCanRead`,
- * and absent otherwise.
- * `generator` is the one its archived Collection Metadata object names, absent
- * when that file names none or does not parse. `indexSchema` is the
- * blinded-index schema sealed in an encrypted collection's archived metadata
- * `custom`, absent when there is none, it declares no index, or no held
- * generation opens it. `custom` is a plaintext collection's archived metadata
- * `custom` value, handed on as archived. It is absent for an encrypted
- * collection, whose `custom` is sealed to the old account's keys, and when the
- * metadata carries none. A throw from it stops that
- * collection, and a throw named `QuotaExceededError` stops the whole walk.
- * `importRow` follows the same outcome and throw rules as the four standard
- * methods. An encrypted collection's row arrives decrypted; a plaintext one's
- * arrives parsed as JSON or as raw bytes, by its content type (see
- * `AppCollectionRow`). Either way it keeps its archived `resourceId`. A sink
- * without the member leaves every app collection's rows counted in
+ * `appCollections` is optional. A sink that carries it migrates app collections
+ * too. `ensureCollection` is called once per app collection, before its first
+ * Resource is opened. `encrypted` says whether the collection is client-side
+ * encrypted, so the host creates the same kind: its archived Collection
+ * Metadata declares `encryption`, or it carries a governing collection log. An
+ * encrypted collection with no log is stopped before `ensureCollection` under
+ * `CollectionLogUnreadableError`. `isPublic` is `true` when the archived
+ * collection policy is `PublicCanRead`, and absent otherwise. `generator` is
+ * the one its archived Collection Metadata object names, absent when that file
+ * names none or does not parse. `indexSchema` is the blinded-index schema
+ * sealed in an encrypted collection's archived metadata `custom`, absent when
+ * there is none, it declares no index, or no held generation opens it. `custom`
+ * is a plaintext collection's archived metadata `custom` value, handed on as
+ * archived. It is absent for an encrypted collection, whose `custom` is sealed
+ * to the old account's keys, and when the metadata carries none. A throw from
+ * it stops that collection, and a throw named `QuotaExceededError` stops the
+ * whole walk. `importResource` follows the same outcome and throw rules as the
+ * four standard methods. An encrypted collection's Resource arrives decrypted;
+ * a plaintext one's arrives parsed as JSON or as raw bytes, by its content type
+ * (see `AppCollectionResource`). Either way it keeps its archived `resourceId`.
+ * A sink without the member leaves every app collection's Resources counted in
  * `notMigrated`.
  */
 export interface MigrationSink {
   importCredential(options: {
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }): Promise<SinkOutcome>
   importContact(options: {
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }): Promise<SinkOutcome>
   importContactRevision(options: {
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }): Promise<SinkOutcome>
   importActivity(options: {
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }): Promise<SinkOutcome>
   appCollections?: {
     ensureCollection(options: {
@@ -112,12 +112,13 @@ export interface MigrationSink {
       indexSchema?: IndexSchema
       custom?: unknown
     }): Promise<void>
-    importRow(options: AppCollectionRow): Promise<SinkOutcome>
+    importResource(options: AppCollectionResource): Promise<SinkOutcome>
   }
 }
 
 /**
- * The name of the sink method each migrated standard collection's rows go to.
+ * The name of the sink method each migrated standard collection's Resources go
+ * to.
  */
 export type MigrationSinkMethod = Exclude<keyof MigrationSink, 'appCollections'>
 
@@ -145,18 +146,18 @@ export const MIGRATION_WALK_ORDER: ReadonlyArray<{
 ]
 
 /**
- * How many consecutive failures end a collection. A permanent per-row cause
- * must not wall off the rows behind it, so a failure never aborts a collection
- * on its own; a run of them is the outage case, and ten wasted writes is the
- * most an outage costs per collection. Not wire: a package constant a release
- * may change.
+ * How many consecutive failures end a collection. A permanent per-Resource
+ * cause must not wall off the Resources behind it, so a failure never aborts a
+ * collection on its own; a run of them is the outage case, and ten wasted
+ * writes is the most an outage costs per collection. Not wire: a package
+ * constant a release may change.
  */
 export const MAX_CONSECUTIVE_FAILURES = 10
 
 /**
  * The error name a sink throw must carry to stop the whole walk rather than
- * fail one row: was-client's 507, a wall that every later row would hit too.
- * Matched by name, never by `instanceof`, since the error is minted in another
- * package.
+ * fail one Resource: was-client's 507, a wall that every later Resource would
+ * hit too. Matched by name, never by `instanceof`, since the error is minted in
+ * another package.
  */
 export const WALK_STOPPING_ERROR_NAME = 'QuotaExceededError'

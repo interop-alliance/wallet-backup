@@ -3,7 +3,7 @@
  */
 /**
  * The content-migration walk: a backup bundle and one old secret in, plaintext
- * rows pushed at a host's sink, and a report of what happened out.
+ * Resources pushed at a host's sink, and a report of what happened out.
  *
  * The walk issues no request. Everything it needs is in the bundle -- the user
  * key roster, each collection's encryption descriptor, every envelope -- so a
@@ -13,11 +13,11 @@
  *
  * It refuses early or not at all. A bundle that cannot be opened, an archive
  * with no account Space, or a secret that is a recipient of nothing fails
- * before a single row reaches the sink. Past that point every failure is a
- * count in the report: a collection whose log will not read, a row no held
+ * before a single Resource reaches the sink. Past that point every failure is a
+ * count in the report: a collection whose log will not read, a Resource no held
  * generation opens, a write the sink could not land. The one exception is the
- * server's quota refusal, which ends the walk, since every later row would hit
- * the same wall.
+ * server's quota refusal, which ends the walk, since every later Resource would
+ * hit the same wall.
  *
  * Key material lives no longer than the walk, as far as it can be scrubbed.
  * The `finally` below zeroes every generation's raw secret and the derived
@@ -51,15 +51,20 @@ import type { MigrationCollectionReport, MigrationReport } from './report.js'
 import { recipientFromSecret } from './secretToRecipient.js'
 import type { MigrationSecret } from './secretToRecipient.js'
 import { MIGRATION_WALK_ORDER, WALK_STOPPING_ERROR_NAME } from './sink.js'
-import type { AppCollectionRow, MigrationSink, SinkOutcome } from './sink.js'
+import type {
+  AppCollectionResource,
+  MigrationSink,
+  SinkOutcome
+} from './sink.js'
 
 /**
- * One collection the walk enters, and where its rows go. `app` is present for
- * an app collection and carries its survey and the sink's `ensureCollection`.
+ * One collection the walk enters, and where its Resources go. `app` is present
+ * for an app collection and carries its survey and the sink's
+ * `ensureCollection`.
  */
 type WalkStep = {
   collectionId: string
-  importRow: (options: AppCollectionRow) => Promise<SinkOutcome>
+  importResource: (options: AppCollectionResource) => Promise<SinkOutcome>
   app?: AppCollectionSurvey & {
     ensureCollection: NonNullable<
       MigrationSink['appCollections']
@@ -90,7 +95,7 @@ function walkSteps({
     for (const [collectionId, app] of appCollections) {
       appSteps.push({
         collectionId,
-        importRow: options => appSink.importRow(options),
+        importResource: options => appSink.importResource(options),
         app: {
           ...app,
           ensureCollection: options => appSink.ensureCollection(options)
@@ -105,12 +110,13 @@ function walkSteps({
     }
     steps.push({
       collectionId,
-      // A standard collection is encrypted, so its rows always arrive parsed.
-      importRow: ({ resourceId, ...body }) =>
+      // A standard collection is encrypted, so its Resources always arrive
+      // parsed.
+      importResource: ({ resourceId, ...body }) =>
         sink[method]({
           collectionId,
           resourceId,
-          row: 'row' in body ? body.row : body.bytes
+          json: 'json' in body ? body.json : body.bytes
         })
     })
   }
@@ -126,9 +132,9 @@ function walkSteps({
  * @param options.secret {MigrationSecret}   the old account's unlock
  *   passphrase, its recovery code, or the backup credential the bundle carries
  * @param options.sink {MigrationSink}   the host's import functions
- * @param [options.signal] {AbortSignal}   checked between rows and before
+ * @param [options.signal] {AbortSignal}   checked between Resources and before
  *   each collection is entered; the walk throws its `reason`
- * @param [options.onProgress] {function}   called once per row with
+ * @param [options.onProgress] {function}   called once per Resource with
  *   `{ collectionId, index, outcome }`
  * @returns {Promise<MigrationReport>}
  */
@@ -205,7 +211,7 @@ export async function migrateBundle({
     })
 
     const steps = walkSteps({ sink, appCollections: survey.appCollections })
-    for (const { collectionId, importRow, app } of steps) {
+    for (const { collectionId, importResource, app } of steps) {
       // An abort between collections ends the walk here, before the next
       // collection is entered or made on the host.
       if (signal?.aborted) {
@@ -258,16 +264,16 @@ export async function migrateBundle({
           })
         }
       } catch (err) {
-        // Rows have already reached the sink by now, so nothing here may end
-        // the walk without a report. An unreadable log is the expected cause;
-        // any other (a descriptor body no cipher can be built from, a host
-        // that could not make the collection) is named as it came.
-        // No row of this collection is handed over, so each is counted as
+        // Resources have already reached the sink by now, so nothing here may
+        // end the walk without a report. An unreadable log is the expected
+        // cause; any other (a descriptor body no cipher can be built from, a
+        // host that could not make the collection) is named as it came. No
+        // Resource of this collection is handed over, so each is counted as
         // unopenable under the cause rather than dropped from the report.
         const cause = (err as Error).name
         tally.stoppedBy = cause
-        const rows = survey.walkedRows.get(collectionId) ?? 0
-        for (let index = 0; index < rows; index++) {
+        const resources = survey.walkedResources.get(collectionId) ?? 0
+        for (let index = 0; index < resources; index++) {
           tally.countUnopenable(cause)
         }
         collections.set(collectionId, tally.toReport())
@@ -280,7 +286,7 @@ export async function migrateBundle({
       const { stopped } = await walkCollection({
         archive,
         collectionId,
-        importRow,
+        importResource,
         ciphers,
         chunked: survey.chunked.get(collectionId) ?? new Set(),
         tally,

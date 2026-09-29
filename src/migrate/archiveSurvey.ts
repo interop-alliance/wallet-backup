@@ -3,14 +3,14 @@
  */
 /**
  * One pass over the account Space archive that gathers everything small the
- * walk needs before it opens a row: the user key roster log, each migrated
+ * walk needs before it opens a Resource: the user key roster log, each migrated
  * collection's governing log, which Resources are stored in chunks, each app
  * collection's `generator`, metadata `custom`, declared `encryption`, and
- * public-read policy, and how many rows sit in the collections the walk
+ * public-read policy, and how many Resources sit in the collections the walk
  * carries no import function for.
  *
- * The survey buffers only those small documents. The rows themselves are read
- * in a later pass per collection, one at a time, so a whole collection is
+ * The survey buffers only those small documents. The Resources themselves are
+ * read in a later pass per collection, one at a time, so a whole collection is
  * never in memory even though the archive is walked more than once.
  */
 import {
@@ -73,9 +73,9 @@ export interface ArchiveSurvey {
    * it migrates none
    */
   appCollections: Map<string, AppCollectionSurvey>
-  /** the row count of each collection the walk reads, by id */
-  walkedRows: Map<string, number>
-  /** the row count of each collection the walk does not migrate, by id */
+  /** the Resource count of each collection the walk reads, by id */
+  walkedResources: Map<string, number>
+  /** the Resource count of each collection the walk does not migrate, by id */
   notMigrated: Map<string, number>
 }
 
@@ -87,7 +87,8 @@ export interface ArchiveSurvey {
  * @param options.migrated {ReadonlySet<string>}   the standard collection ids
  *   the walk migrates
  * @param options.migratesAppCollections {boolean}   whether the walk migrates
- *   app collections; when it does not, their rows are counted as not migrated
+ *   app collections; when it does not, their Resources are counted as not
+ *   migrated
  * @returns {Promise<ArchiveSurvey>}
  */
 export async function surveyArchive({
@@ -104,13 +105,14 @@ export async function surveyArchive({
     chunked: new Map(),
     present: new Set(),
     appCollections: new Map(),
-    walkedRows: new Map(),
+    walkedResources: new Map(),
     notMigrated: new Map()
   }
   const appCollections = new Map<string, AppCollectionSurvey>()
 
   /**
-   * Whether the walk reads this collection's rows rather than counting them.
+   * Whether the walk reads this collection's Resources rather than counting
+   * them.
    * @param collectionId {string}
    * @returns {boolean}
    */
@@ -197,7 +199,7 @@ export async function surveyArchive({
       continue
     }
     const counts = isWalked(collectionId)
-      ? survey.walkedRows
+      ? survey.walkedResources
       : survey.notMigrated
     counts.set(collectionId, (counts.get(collectionId) ?? 0) + 1)
   }

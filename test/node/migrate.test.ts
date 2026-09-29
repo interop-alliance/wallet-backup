@@ -3,9 +3,9 @@
  */
 /**
  * The migration walk, over fixture bundles built in this process: the happy
- * path per standard collection, the refusals that come before any row is
- * written, the per-row and per-collection failure rules, and the two stops.
- * Every test installs a `fetch` that throws, so a walk that reached the
+ * path per standard collection, the refusals that come before any Resource is
+ * written, the per-Resource and per-collection failure rules, and the two
+ * stops. Every test installs a `fetch` that throws, so a walk that reached the
  * network would fail loudly rather than quietly work.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -46,7 +46,7 @@ import {
   BUNDLE_ROLE
 } from '../../src/index.js'
 import type {
-  AppCollectionRow,
+  AppCollectionResource,
   MigrationCollectionReport,
   MigrationReport,
   MigrationSecret,
@@ -59,12 +59,12 @@ import {
   collectionDir,
   collectionLogFile,
   chunkDir,
-  encryptRows,
+  encryptResources,
   jsonFile,
   keyMapDir,
   logBody,
   mintGenerations,
-  plaintextRows,
+  plaintextResources,
   sealedCustom,
   recipientFor,
   rosterDescriptor,
@@ -78,11 +78,11 @@ import type { Generation } from '../fixtures/migration/bundle.js'
  */
 interface FixtureCollection {
   collectionId: string
-  rows: unknown[]
+  resources: unknown[]
   openedBy: Generation[][]
   log?: 'wrapped' | 'broken' | 'omit'
   chunked?: string[]
-  /** rows written as plain JSON under `row-<n>` ids, with no collection log */
+  /** Resources written as plain JSON under `resource-<n>` ids, with no collection log */
   plaintext?: boolean
   /** the Collection Metadata file's body */
   metadata?: unknown
@@ -202,7 +202,7 @@ async function fixtureBundle({
     let metadata = collection.metadata
     let leadingFiles: ArchiveFile[]
     if (collection.plaintext === true) {
-      leadingFiles = plaintextRows(collection.rows)
+      leadingFiles = plaintextResources(collection.resources)
     } else {
       const encryption = await collectionDescriptor({
         openedBy: collection.openedBy,
@@ -235,10 +235,10 @@ async function fixtureBundle({
                 body: log === 'broken' ? 'not a log' : logBody(encryption)
               })
             ]),
-        ...(await encryptRows({
+        ...(await encryptResources({
           collectionId: collection.collectionId,
           encryption,
-          rows: collection.rows
+          resources: collection.resources
         }))
       ]
     }
@@ -268,21 +268,21 @@ async function fixtureBundle({
  * `answer` function returns (or throws).
  *
  * @param [answer] {function}   `({ collectionId, index }) => SinkOutcome`
- * @returns {MigrationSink & { calls: Array<{ collectionId: string, resourceId: string, row: unknown }> }}
+ * @returns {MigrationSink & { calls: Array<{ collectionId: string, resourceId: string, json: unknown }> }}
  */
 function recordingSink(
   answer?: (options: {
     collectionId: string
     index: number
-    row: unknown
+    json: unknown
   }) => SinkOutcome
 ): MigrationSink & {
-  calls: Array<{ collectionId: string; resourceId: string; row: unknown }>
+  calls: Array<{ collectionId: string; resourceId: string; json: unknown }>
 } {
   const calls: Array<{
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }> = []
   const seen = new Map<string, number>()
 
@@ -291,22 +291,22 @@ function recordingSink(
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.resourceId {string}
-   * @param options.row {unknown}
+   * @param options.json {unknown}
    * @returns {Promise<SinkOutcome>}
    */
   async function record({
     collectionId,
     resourceId,
-    row
+    json
   }: {
     collectionId: string
     resourceId: string
-    row: unknown
+    json: unknown
   }): Promise<SinkOutcome> {
-    calls.push({ collectionId, resourceId, row })
+    calls.push({ collectionId, resourceId, json })
     const index = seen.get(collectionId) ?? 0
     seen.set(collectionId, index + 1)
-    return answer ? answer({ collectionId, index, row }) : 'accepted'
+    return answer ? answer({ collectionId, index, json }) : 'accepted'
   }
 
   return {
@@ -320,8 +320,9 @@ function recordingSink(
 
 /**
  * A recording sink that also migrates app collections. `events` lists every
- * `ensure:<id>` and `row:<id>` call in order, `ensured` keeps each
- * `ensureCollection` argument, and `appRows` keeps each `importRow` argument.
+ * `ensure:<id>` and `resource:<id>` call in order, `ensured` keeps each
+ * `ensureCollection` argument, and `appResources` keeps each `importResource`
+ * argument.
  *
  * @param [options] {object}
  * @param [options.answer] {function}   as {@link recordingSink} takes it
@@ -336,7 +337,7 @@ function appRecordingSink({
   answer?: (options: {
     collectionId: string
     index: number
-    row: unknown
+    json: unknown
   }) => SinkOutcome
   ensure?: (collectionId: string) => void
 } = {}) {
@@ -347,24 +348,26 @@ function appRecordingSink({
       NonNullable<MigrationSink['appCollections']>['ensureCollection']
     >[0]
   > = []
-  const appRows: AppCollectionRow[] = []
+  const appResources: AppCollectionResource[] = []
   return {
     ...sink,
     events,
     ensured,
-    appRows,
+    appResources,
     appCollections: {
       async ensureCollection(options: (typeof ensured)[number]): Promise<void> {
         events.push(`ensure:${options.collectionId}`)
         ensured.push(options)
         ensure?.(options.collectionId)
       },
-      async importRow(options: AppCollectionRow): Promise<SinkOutcome> {
-        events.push(`row:${options.collectionId}`)
-        appRows.push(options)
+      async importResource(
+        options: AppCollectionResource
+      ): Promise<SinkOutcome> {
+        events.push(`resource:${options.collectionId}`)
+        appResources.push(options)
         const { collectionId, resourceId } = options
-        const row = 'row' in options ? options.row : options.bytes
-        return sink.importContact({ collectionId, resourceId, row })
+        const json = 'json' in options ? options.json : options.bytes
+        return sink.importContact({ collectionId, resourceId, json })
       }
     }
   }
@@ -379,7 +382,8 @@ function appRecordingSink({
  *   the minted generations, oldest first
  * @param [options.generationCount] {number}   1 by default
  * @param [options.sink] {ReturnType<typeof appRecordingSink>}
- * @returns {Promise<{ sink: ReturnType<typeof appRecordingSink>, report: MigrationReport }>}
+ * @returns {Promise<{ sink: ReturnType<typeof appRecordingSink>, report:
+ *   MigrationReport }>}
  */
 async function runApp({
   collections,
@@ -409,7 +413,8 @@ async function runApp({
 }
 
 /**
- * The four standard collections, one row each, all opened by one generation.
+ * The four standard collections, one Resource each, all opened by one
+ * generation.
  * @param generation {Generation}
  * @returns {FixtureCollection[]}
  */
@@ -417,22 +422,22 @@ function standardCollections(generation: Generation): FixtureCollection[] {
   return [
     {
       collectionId: CONTACTS_COLLECTION,
-      rows: [{ contactId: 'c-1' }],
+      resources: [{ contactId: 'c-1' }],
       openedBy: [[generation]]
     },
     {
       collectionId: CONTACTS_HISTORY_COLLECTION,
-      rows: [{ contactId: 'c-1', action: 'create' }],
+      resources: [{ contactId: 'c-1', action: 'create' }],
       openedBy: [[generation]]
     },
     {
       collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-      rows: [{ cid: 'z-cred' }],
+      resources: [{ cid: 'z-cred' }],
       openedBy: [[generation]]
     },
     {
       collectionId: WALLET_ACTIVITY_COLLECTION,
-      rows: [{ id: 'act-1' }],
+      resources: [{ id: 'act-1' }],
       openedBy: [[generation]]
     }
   ]
@@ -451,7 +456,7 @@ describe('migrateBundle', () => {
     globalThis.fetch = realFetch
   })
 
-  it('opens one row per standard collection with the recovery code', async () => {
+  it('opens one Resource per standard collection with the recovery code', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -472,7 +477,7 @@ describe('migrateBundle', () => {
       PRIVATE_CREDENTIALS_COLLECTION,
       WALLET_ACTIVITY_COLLECTION
     ])
-    expect(sink.calls[0]!.row).toEqual({ contactId: 'c-1' })
+    expect(sink.calls[0]!.json).toEqual({ contactId: 'c-1' })
     expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual({
       accepted: 1,
       skipped: 0,
@@ -557,10 +562,10 @@ describe('migrateBundle', () => {
             collectionId: CONTACTS_COLLECTION,
             body: logBody(encryption)
           }),
-          ...(await encryptRows({
+          ...(await encryptResources({
             collectionId: CONTACTS_COLLECTION,
             encryption,
-            rows: [{ contactId: 'c-old' }]
+            resources: [{ contactId: 'c-old' }]
           }))
         ]
       })
@@ -587,7 +592,7 @@ describe('migrateBundle', () => {
     expect(laterSink.calls).toHaveLength(0)
   })
 
-  it('opens every row of a torn cascade', async () => {
+  it('opens every Resource of a torn cascade', async () => {
     const [older, newer] = await mintGenerations(2)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -596,12 +601,12 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }],
+          resources: [{ contactId: 'c-1' }],
           openedBy: [[newer!]]
         },
         {
           collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-          rows: [{ cid: 'z-1' }],
+          resources: [{ cid: 'z-1' }],
           openedBy: [[older!]]
         }
       ]
@@ -618,7 +623,7 @@ describe('migrateBundle', () => {
     expect(report.collections[CONTACTS_COLLECTION]!.unopenable).toBe(0)
   })
 
-  it('reports rows no held generation opens, by name', async () => {
+  it('reports Resources no held generation opens, by name', async () => {
     const [older, newer] = await mintGenerations(2)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -630,7 +635,7 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
           openedBy: [[older!]]
         }
       ]
@@ -658,7 +663,7 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }],
+          resources: [{ contactId: 'c-1' }],
           openedBy: [[generation!]],
           chunked: ['big.blob']
         }
@@ -695,7 +700,7 @@ describe('migrateBundle', () => {
     }
   })
 
-  it('counts a sink throw as a failed row and carries on', async () => {
+  it('counts a sink throw as a failed Resource and carries on', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -704,7 +709,7 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
           openedBy: [[generation!]]
         }
       ]
@@ -739,14 +744,14 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: Array.from({ length: 12 }, (_unused, index) => ({
+          resources: Array.from({ length: 12 }, (_unused, index) => ({
             contactId: `c-${index}`
           })),
           openedBy: [[generation!]]
         },
         {
           collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-          rows: [{ cid: 'z-1' }],
+          resources: [{ cid: 'z-1' }],
           openedBy: [[generation!]]
         }
       ]
@@ -801,7 +806,7 @@ describe('migrateBundle', () => {
     expect(report.collections[WALLET_ACTIVITY_COLLECTION]).toBeUndefined()
   })
 
-  it('counts app-connections rows as not migrated and calls no sink method', async () => {
+  it('counts app-connections Resources as not migrated and calls no sink method', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -810,12 +815,12 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }],
+          resources: [{ contactId: 'c-1' }],
           openedBy: [[generation!]]
         },
         {
           collectionId: APP_CONNECTIONS_COLLECTION,
-          rows: [{ app: 'one' }, { app: 'two' }],
+          resources: [{ app: 'one' }, { app: 'two' }],
           openedBy: [[generation!]]
         }
       ]
@@ -842,7 +847,7 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: '__proto__',
-          rows: [{ note: 'one' }],
+          resources: [{ note: 'one' }],
           openedBy: [[generation!]]
         }
       ]
@@ -865,13 +870,13 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }],
+          resources: [{ contactId: 'c-1' }],
           openedBy: [[generation!]],
           log: 'broken'
         },
         {
           collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-          rows: [{ cid: 'z-1' }],
+          resources: [{ cid: 'z-1' }],
           openedBy: [[generation!]]
         }
       ]
@@ -891,7 +896,7 @@ describe('migrateBundle', () => {
     expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]!.accepted).toBe(1)
   })
 
-  it('aborts between rows with the signal reason', async () => {
+  it('aborts between Resources with the signal reason', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -900,7 +905,7 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          rows: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
           openedBy: [[generation!]]
         }
       ]
@@ -922,7 +927,7 @@ describe('migrateBundle', () => {
     expect(sink.calls).toHaveLength(1)
   })
 
-  it('reports progress per row', async () => {
+  it('reports progress per Resource', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -1033,10 +1038,10 @@ describe('migrateBundle', () => {
               collectionId: CONTACTS_COLLECTION,
               body: malformedLogBody
             }),
-            ...(await encryptRows({
+            ...(await encryptResources({
               collectionId: CONTACTS_COLLECTION,
               encryption,
-              rows: [{ contactId: 'c-1' }]
+              resources: [{ contactId: 'c-1' }]
             }))
           ]
         }),
@@ -1047,10 +1052,10 @@ describe('migrateBundle', () => {
               collectionId: PRIVATE_CREDENTIALS_COLLECTION,
               body: logBody(encryption)
             }),
-            ...(await encryptRows({
+            ...(await encryptResources({
               collectionId: PRIVATE_CREDENTIALS_COLLECTION,
               encryption,
-              rows: [{ cid: 'z-1' }]
+              resources: [{ cid: 'z-1' }]
             }))
           ]
         })
@@ -1091,10 +1096,10 @@ describe('migrateBundle', () => {
               collectionId: CONTACTS_COLLECTION,
               body: logBody(encryption)
             }),
-            ...(await encryptRows({
+            ...(await encryptResources({
               collectionId: CONTACTS_COLLECTION,
               encryption,
-              rows: [{ contactId: 'c-1' }]
+              resources: [{ contactId: 'c-1' }]
             })),
             {
               name: 'r.%E0.x.json',
@@ -1123,12 +1128,12 @@ describe('migrateBundle', () => {
       name: 'Example App'
     }
 
-    it('migrates an encrypted app collection, ensuring it with its generator before any row', async () => {
+    it('migrates an encrypted app collection, ensuring it with its generator before any Resource', async () => {
       const { sink, report } = await runApp({
         collections: ([generation]) => [
           {
             collectionId: 'notes',
-            rows: [{ note: 'one' }, { note: 'two' }],
+            resources: [{ note: 'one' }, { note: 'two' }],
             openedBy: [[generation!]],
             metadata: {
               id: 'notes',
@@ -1139,14 +1144,18 @@ describe('migrateBundle', () => {
           }
         ]
       })
-      expect(sink.events).toEqual(['ensure:notes', 'row:notes', 'row:notes'])
+      expect(sink.events).toEqual([
+        'ensure:notes',
+        'resource:notes',
+        'resource:notes'
+      ])
       expect(sink.ensured).toEqual([
         { collectionId: 'notes', encrypted: true, generator }
       ])
-      expect(sink.calls.map(call => call.row)).toEqual(
+      expect(sink.calls.map(call => call.json)).toEqual(
         expect.arrayContaining([{ note: 'one' }, { note: 'two' }])
       )
-      expect(sink.appRows.map(row => row.contentType)).toEqual([
+      expect(sink.appResources.map(resource => resource.contentType)).toEqual([
         'application/json',
         'application/json'
       ])
@@ -1154,12 +1163,12 @@ describe('migrateBundle', () => {
       expect(report.notMigrated['notes']).toBeUndefined()
     })
 
-    it('migrates a public plaintext app collection with its archived resource ids', async () => {
+    it('migrates a public plaintext app collection with its archived Resource ids', async () => {
       const { sink, report } = await runApp({
         collections: () => [
           {
             collectionId: 'public-posts',
-            rows: [{ post: 'hello' }],
+            resources: [{ post: 'hello' }],
             openedBy: [],
             plaintext: true,
             chunked: ['video.bin'],
@@ -1179,12 +1188,12 @@ describe('migrateBundle', () => {
           generator
         }
       ])
-      expect(sink.appRows).toEqual([
+      expect(sink.appResources).toEqual([
         {
           collectionId: 'public-posts',
-          resourceId: 'row-0',
+          resourceId: 'resource-0',
           contentType: 'application/json',
-          row: { post: 'hello' }
+          json: { post: 'hello' }
         }
       ])
       expect(report.collections['public-posts']).toEqual(
@@ -1200,13 +1209,13 @@ describe('migrateBundle', () => {
       expect(report.notMigrated['public-posts']).toBeUndefined()
     })
 
-    it('hands a plaintext non-JSON resource on as its bytes, and parses any +json type', async () => {
+    it('hands a plaintext non-JSON Resource on as its bytes, and parses any +json type', async () => {
       const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
       const { sink, report } = await runApp({
         collections: () => [
           {
             collectionId: 'public-posts',
-            rows: [],
+            resources: [],
             openedBy: [],
             plaintext: true,
             extraFiles: [
@@ -1235,7 +1244,9 @@ describe('migrateBundle', () => {
           }
         ]
       })
-      const byId = new Map(sink.appRows.map(row => [row.resourceId, row]))
+      const byId = new Map(
+        sink.appResources.map(resource => [resource.resourceId, resource])
+      )
       expect(byId.get('logo')).toEqual({
         collectionId: 'public-posts',
         resourceId: 'logo',
@@ -1252,7 +1263,7 @@ describe('migrateBundle', () => {
         collectionId: 'public-posts',
         resourceId: 'profile',
         contentType: 'application/ld+json',
-        row: { name: 'x' }
+        json: { name: 'x' }
       })
       expect(report.collections['public-posts']).toMatchObject({
         accepted: 3,
@@ -1265,7 +1276,7 @@ describe('migrateBundle', () => {
         collections: ([generation]) => [
           {
             collectionId: 'notes',
-            rows: [{ note: 'one' }],
+            resources: [{ note: 'one' }],
             openedBy: [[generation!]],
             log: 'omit',
             metadata: {
@@ -1290,7 +1301,7 @@ describe('migrateBundle', () => {
         collections: () => [
           {
             collectionId: 'posts',
-            rows: [{ post: 'a' }],
+            resources: [{ post: 'a' }],
             openedBy: [],
             plaintext: true,
             metadataFile: 'broken'
@@ -1313,7 +1324,7 @@ describe('migrateBundle', () => {
         collections: () => [
           {
             collectionId: 'posts',
-            rows: [{ post: 'a' }],
+            resources: [{ post: 'a' }],
             openedBy: [],
             plaintext: true,
             metadataFile: 'omit'
@@ -1336,7 +1347,7 @@ describe('migrateBundle', () => {
         collections: () => [
           {
             collectionId: 'posts',
-            rows: [{ post: 'a' }],
+            resources: [{ post: 'a' }],
             openedBy: [],
             plaintext: true,
             metadata: { id: 'posts', custom: { theme: 'dark' } }
@@ -1346,12 +1357,12 @@ describe('migrateBundle', () => {
       expect(sink.ensured).toEqual([
         { collectionId: 'posts', encrypted: false, custom: { theme: 'dark' } }
       ])
-      expect(sink.appRows).toEqual([
+      expect(sink.appResources).toEqual([
         {
           collectionId: 'posts',
-          resourceId: 'row-0',
+          resourceId: 'resource-0',
           contentType: 'application/json',
-          row: { post: 'a' }
+          json: { post: 'a' }
         }
       ])
       expect(report.collections['posts']).toEqual(tally({ accepted: 1 }))
@@ -1363,18 +1374,18 @@ describe('migrateBundle', () => {
       const bundle = await fixtureBundle({
         generations,
         recipients: [recipient],
-        // app-a's row is the archive's last entry, so walkCollection finds no
-        // entry after it to check the signal on.
+        // app-a's Resource is the archive's last entry, so walkCollection finds
+        // no entry after it to check the signal on.
         collections: [
           {
             collectionId: 'app-b',
-            rows: [{ post: 'b' }],
+            resources: [{ post: 'b' }],
             openedBy: [],
             plaintext: true
           },
           {
             collectionId: 'app-a',
-            rows: [{ post: 'a' }],
+            resources: [{ post: 'a' }],
             openedBy: [],
             plaintext: true
           }
@@ -1384,7 +1395,7 @@ describe('migrateBundle', () => {
       const reason = new Error('the user cancelled the import')
       const sink = appRecordingSink({
         answer: ({ collectionId }) => {
-          // The abort lands with app-a's last row.
+          // The abort lands with app-a's last Resource.
           if (collectionId === 'app-a') {
             controller.abort(reason)
           }
@@ -1399,7 +1410,7 @@ describe('migrateBundle', () => {
           signal: controller.signal
         })
       ).rejects.toBe(reason)
-      expect(sink.events).toEqual(['ensure:app-a', 'row:app-a'])
+      expect(sink.events).toEqual(['ensure:app-a', 'resource:app-a'])
     })
 
     it('hands no isPublic when the collection policy grants no public read', async () => {
@@ -1407,20 +1418,20 @@ describe('migrateBundle', () => {
         collections: () => [
           {
             collectionId: 'plain-a',
-            rows: [{ post: 'a' }],
+            resources: [{ post: 'a' }],
             openedBy: [],
             plaintext: true
           },
           {
             collectionId: 'plain-b',
-            rows: [{ post: 'b' }],
+            resources: [{ post: 'b' }],
             openedBy: [],
             plaintext: true,
             extraFiles: [policyFile(JSON.stringify({ type: 'SomethingElse' }))]
           },
           {
             collectionId: 'plain-c',
-            rows: [{ post: 'c' }],
+            resources: [{ post: 'c' }],
             openedBy: [],
             plaintext: true,
             extraFiles: [policyFile('not json')]
@@ -1439,18 +1450,18 @@ describe('migrateBundle', () => {
         collections: ([generation]) => [
           {
             collectionId: 'app-a',
-            rows: [{ note: 'a' }],
+            resources: [{ note: 'a' }],
             openedBy: [[generation!]]
           },
           {
             collectionId: 'app-b',
-            rows: [{ note: 'b' }],
+            resources: [{ note: 'b' }],
             openedBy: [[generation!]],
             metadata: 'not an object'
           },
           {
             collectionId: 'app-c',
-            rows: [{ note: 'c' }],
+            resources: [{ note: 'c' }],
             openedBy: [[generation!]],
             metadata: { id: 'app-c', generator: { origin: 'no id' } }
           }
@@ -1475,7 +1486,7 @@ describe('migrateBundle', () => {
         collections: ([older, newer]) => [
           {
             collectionId: 'notes',
-            rows: [{ note: 'one' }],
+            resources: [{ note: 'one' }],
             // The schema was sealed under the first epoch, which the newest
             // generation cannot unwrap, so the older one opens it.
             openedBy: [[older!], [older!, newer!]],
@@ -1494,12 +1505,12 @@ describe('migrateBundle', () => {
       expect(report.collections['notes']!.accepted).toBe(1)
     })
 
-    it('hands no index schema when the sealed custom will not open, and migrates the rows', async () => {
+    it('hands no index schema when the sealed custom will not open, and migrates the Resources', async () => {
       const { sink, report } = await runApp({
         collections: ([generation]) => [
           {
             collectionId: 'notes',
-            rows: [{ note: 'one' }],
+            resources: [{ note: 'one' }],
             openedBy: [[generation!]],
             hmacFor: [generation!],
             // Sealed for another collection, so the id binding refuses it.
@@ -1511,14 +1522,14 @@ describe('migrateBundle', () => {
           },
           {
             collectionId: 'plain-custom',
-            rows: [{ note: 'two' }],
+            resources: [{ note: 'two' }],
             openedBy: [[generation!]],
             hmacFor: [generation!],
             metadata: { id: 'plain-custom', custom: { not: 'an envelope' } }
           },
           {
             collectionId: 'no-custom',
-            rows: [{ note: 'three' }],
+            resources: [{ note: 'three' }],
             openedBy: [[generation!]],
             hmacFor: [generation!]
           }
@@ -1540,13 +1551,13 @@ describe('migrateBundle', () => {
           ...standardCollections(generation!),
           {
             collectionId: 'zeta',
-            rows: [{ note: 'z' }],
+            resources: [{ note: 'z' }],
             openedBy: [],
             plaintext: true
           },
           {
             collectionId: 'alpha',
-            rows: [{ note: 'a' }],
+            resources: [{ note: 'a' }],
             openedBy: [[generation!]]
           }
         ]
@@ -1572,12 +1583,12 @@ describe('migrateBundle', () => {
         collections: [
           {
             collectionId: 'notes',
-            rows: [{ note: 'one' }, { note: 'two' }],
+            resources: [{ note: 'one' }, { note: 'two' }],
             openedBy: [[generation!]]
           },
           {
             collectionId: 'public-posts',
-            rows: [{ post: 'hello' }],
+            resources: [{ post: 'hello' }],
             openedBy: [],
             plaintext: true
           }
@@ -1600,7 +1611,7 @@ describe('migrateBundle', () => {
         collections: ([generation]) => [
           {
             collectionId: APP_CONNECTIONS_COLLECTION,
-            rows: [{ app: 'one' }],
+            resources: [{ app: 'one' }],
             openedBy: [[generation!]]
           }
         ]
@@ -1623,17 +1634,21 @@ describe('migrateBundle', () => {
         collections: ([generation]) => [
           {
             collectionId: 'app-a',
-            rows: [{ note: 'a' }],
+            resources: [{ note: 'a' }],
             openedBy: [[generation!]]
           },
           {
             collectionId: 'app-b',
-            rows: [{ note: 'b' }],
+            resources: [{ note: 'b' }],
             openedBy: [[generation!]]
           }
         ]
       })
-      expect(sink.events).toEqual(['ensure:app-a', 'ensure:app-b', 'row:app-b'])
+      expect(sink.events).toEqual([
+        'ensure:app-a',
+        'ensure:app-b',
+        'resource:app-b'
+      ])
       expect(report.collections['app-a']).toEqual(
         tally({
           unopenable: 1,
@@ -1658,7 +1673,7 @@ describe('migrateBundle', () => {
           ...standardCollections(generation!),
           {
             collectionId: 'app-a',
-            rows: [{ note: 'a' }],
+            resources: [{ note: 'a' }],
             openedBy: [[generation!]]
           }
         ]

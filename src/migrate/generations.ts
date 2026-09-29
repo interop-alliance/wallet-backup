@@ -9,11 +9,11 @@
  * wrapped to every enrolled recipient, so one old secret recovers the whole
  * history rather than the epoch it was enrolled at. The walk needs them all:
  * a cascade that tore halfway leaves the newest generation opening some
- * collections' epochs and an older one the rest, and a row is opened by
+ * collections' epochs and an older one the rest, and a Resource is opened by
  * whichever generation holds its epoch.
  *
  * Generations arrive oldest first and are reversed here, because the newest is
- * the one most rows open under and every fallback costs a failed unwrap.
+ * the one most Resources open under and every fallback costs a failed unwrap.
  *
  * The same ciphers also open an encrypted collection's archived metadata
  * `custom` envelope, for the blinded-index schema it carries.
@@ -38,9 +38,9 @@ export type UserKeyGeneration = Awaited<
 /**
  * Recovers every user key generation the secret's recipient key holds a wrap
  * for, newest first. A secret that is a recipient of none is not a recipient
- * of this bundle at all, which is refused here -- before a single row is
+ * of this bundle at all, which is refused here -- before a single Resource is
  * decrypted, so a wrong passphrase fails the whole walk rather than emptying
- * it row by row.
+ * it Resource by Resource.
  *
  * @param options {object}
  * @param options.descriptor {CollectionEncryption}   the archived roster
@@ -69,10 +69,10 @@ export async function recoverGenerations({
 }
 
 /**
- * Builds one decrypting cipher per generation for one collection, newest
- * first. A generation that is a recipient of no epoch of this collection is
- * left out rather than fatal: on a torn cascade that is the normal state, and
- * the generations that do open epochs still open their rows. No `spaceId` is
+ * Builds one decrypting cipher per generation for one collection, newest first.
+ * A generation that is a recipient of no epoch of this collection is left out
+ * rather than fatal: on a torn cascade that is the normal state, and the
+ * generations that do open epochs still open their Resources. No `spaceId` is
  * passed, so the cipher builds no transport and the walk issues no request.
  *
  * @param options {object}

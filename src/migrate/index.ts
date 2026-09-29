@@ -21,7 +21,7 @@ export {
   WALK_STOPPING_ERROR_NAME
 } from './sink.js'
 export type {
-  AppCollectionRow,
+  AppCollectionResource,
   MigrationSink,
   MigrationSinkMethod,
   SinkOutcome

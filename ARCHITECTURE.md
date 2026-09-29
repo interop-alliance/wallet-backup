@@ -33,8 +33,8 @@ src/migrate/migrateBundle.ts      `migrateBundle`: bundle + secret + sink to a r
 src/migrate/secretToRecipient.ts  One old secret to the roster recipient it stands for
 src/migrate/descriptorLog.ts      An archived governing log to its encryption descriptor
 src/migrate/generations.ts        The user key generations, a cipher per generation, the index schema
-src/migrate/archiveSurvey.ts      One pass gathering the logs, chunk dirs, generators, and row counts
-src/migrate/collectionWalk.ts     One collection's rows, one at a time, to the sink
+src/migrate/archiveSurvey.ts      One pass gathering the logs, chunk dirs, generators, and Resource counts
+src/migrate/collectionWalk.ts     One collection's Resources, one at a time, to the sink
 src/migrate/report.ts             The report shape and the per-collection tally
 src/migrate/sink.ts               The sink port, the walk order, and the walk's two limits
 ```
@@ -61,18 +61,18 @@ The dependency direction inside this package is one way: `migrate/` reads
 3. **Nothing large is held whole.** Both readers parse their manifest from the
    first tar entry and then walk lazily, so at most one Space archive is in
    memory at a time. The walks are one-shot: a caller iterates them once and
-   reads an entry's bytes before advancing. The migration walk holds one row on
-   top of that: it awaits each sink call before it reads the next entry, and it
-   buffers nothing per collection but the small documents `archiveSurvey.ts`
-   gathers (each governing log, each app collection's `generator`, metadata
-   `custom`, and public-read policy, the chunk-directory names, and each
-   collection's row count). The writer streams: `writeBundle` returns before its
-   Space entries are written, awaits the pack's drain between entries, and
-   collects at most three Space archives at once (a tar header carries the entry
-   size, so an archive is collected whole before its entry). A consumer that
-   stops reading stops the per-Space exports behind it. A cancel, a failed entry
-   or an abort stops the writer: no further collection starts, and one in flight
-   is released at its next chunk.
+   reads an entry's bytes before advancing. The migration walk holds one
+   Resource on top of that: it awaits each sink call before it reads the next
+   entry, and it buffers nothing per collection but the small documents
+   `archiveSurvey.ts` gathers (each governing log, each app collection's
+   `generator`, metadata `custom`, and public-read policy, the chunk-directory
+   names, and each collection's Resource count). The writer streams:
+   `writeBundle` returns before its Space entries are written, awaits the pack's
+   drain between entries, and collects at most three Space archives at once (a
+   tar header carries the entry size, so an archive is collected whole before
+   its entry). A consumer that stops reading stops the per-Space exports behind
+   it. A cancel, a failed entry or an abort stops the writer: no further
+   collection starts, and one in flight is released at its next chunk.
 4. **The codecs are isomorphic.** No module under `src/` imports `node:*`, and
    no public type names `Buffer`; bytes are `Uint8Array` and streams arrive as a
    `ByteSource` (`@interop/space-archive`'s type, re-exported here since
@@ -147,11 +147,11 @@ The dependency direction inside this package is one way: `migrate/` reads
    it returns, and never returned; the host hands over a copy if it needs them.
 10. **The walk refuses early or counts.** `BundleInvalidError`,
     `AccountSpaceArchiveMissingError` and `BundleRecipientMissingError` are
-    raised before any row reaches a sink. Past that point every failure is a
-    number in the report -- an unreadable collection log, a row no generation
-    opens, an app collection the host could not ensure, a write that did not
-    land -- except a sink throw named `QuotaExceededError`, which ends the walk
-    and is named in `stoppedAt`.
+    raised before any Resource reaches a sink. Past that point every failure is
+    a number in the report -- an unreadable collection log, a Resource no
+    generation opens, an app collection the host could not ensure, a write that
+    did not land -- except a sink throw named `QuotaExceededError`, which ends
+    the walk and is named in `stoppedAt`.
 
 ## Ownership heuristics
 
@@ -171,7 +171,7 @@ The dependency direction inside this package is one way: `migrate/` reads
   reference implementation in `@interop/was-client`. This package is a listed
   party to that contract, as a consumer: `migrate/descriptorLog.ts` reads a
   descriptor out of an archived resource log, `migrate/generations.ts` unwraps
-  its epoch secrets and opens rows through `createEdvDocCipher`, and
+  its epoch secrets and opens Resources through `createEdvDocCipher`, and
   `bundle/backupCredential.ts` seals the packed credential under a one-epoch
   descriptor of the same construction. A normative change there is a walk of
   that spec's parties table and reaches this repo through it.
@@ -216,8 +216,8 @@ The dependency direction inside this package is one way: `migrate/` reads
   `migrateBundle` take one as a parameter. Avoid: input stream, reader, source
   stream.
 - **Migration** -- one run of `migrateBundle`: a bundle and one old secret in,
-  decrypted rows pushed at a sink, a report out. Lives in `src/migrate/`. Avoid:
-  import, restore, recovery (which is the recovery code's word here).
+  decrypted Resources pushed at a sink, a report out. Lives in `src/migrate/`.
+  Avoid: import, restore, recovery (which is the recovery code's word here).
 - **App collection** -- a collection in the account Space archive outside the
   wallet Space's own layout (`WALLET_SPACE_PROVISION_ROSTER`). It is plaintext
   only when its archived metadata file exists, parses, and declares no
@@ -227,20 +227,29 @@ The dependency direction inside this package is one way: `migrate/` reads
   and activity, by id. Avoid: third-party collection, custom collection.
 - **Sink** -- the host's side of the migration: one import function per migrated
   standard collection, plus an optional `appCollections` pair, each taking one
-  decrypted row and answering `accepted`, `skipped`, `conflicting` or `failed`.
-  The only wallet-specific code the walk touches, and the reason this package
-  knows no wallet row types. See
+  decrypted Resource and answering `accepted`, `skipped`, `conflicting` or
+  `failed`. The only wallet-specific code the walk touches, and the reason this
+  package knows no wallet data types. See
   `decisions/0001-the-walk-lives-here-behind-a-push-sink.md`. Avoid: writer,
   handler, callback, consumer.
 - **Generation** -- one epoch of the account's user key, recovered from the
   archived roster. Every generation is wrapped to every enrolled secret, so one
-  old secret recovers the whole history; a row is opened by whichever generation
-  holds its collection's epoch. Avoid: user key version, key epoch (which is the
-  collection-side term), rotation.
+  old secret recovers the whole history; a Resource is opened by whichever
+  generation holds its collection's epoch. Avoid: user key version, key epoch
+  (which is the collection-side term), rotation.
 - **Report** -- what a finished walk hands back: the bundle manifest minus its
-  `contents`, the per-collection counts, the rows the walk did not migrate, and
-  a `stoppedAt` where a quota refusal ended it. The host builds its own activity
-  row from it; the walk writes none. Avoid: summary, result, stats.
+  `contents`, the per-collection counts, the Resources the walk did not migrate,
+  and a `stoppedAt` where a quota refusal ended it. The host builds its own
+  activity row from it; the walk writes none. Avoid: summary, result, stats.
+- **Resource** -- the WAS spec's unit of storage in a collection, and the unit
+  of a migration: the walk reads one archived Resource, opens it, hands it to a
+  sink in one call, and the report counts it under one outcome. A chunked
+  Resource is one Resource however many chunk files the archive holds for it.
+  Write "migrating Resource" only where a Resource on the server must be told
+  apart from one in the walk. Its decrypted payload is `json` when it parses as
+  JSON and `bytes` otherwise. Avoid: row, record, item, document (EDV's word for
+  the encrypted envelope). The host's "activity row" is the host's own term and
+  is unaffected.
 
 ## Current State labels
 

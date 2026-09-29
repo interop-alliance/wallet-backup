@@ -33,7 +33,7 @@ import {
   collectionDescriptor,
   collectionDir,
   collectionLogFile,
-  encryptRows,
+  encryptResources,
   jsonFile,
   keyMapDir,
   logBody,
@@ -96,7 +96,8 @@ const EXPORT_PASSPHRASE = 'an export passphrase'
  * Mints a backup credential's secret and the standing client it derives,
  * through the backup credential's own KDF, independently of the code under
  * test.
- * @returns {Promise<{ secret: Uint8Array, client: Awaited<ReturnType<typeof standingClientFromUnlockSeed>> }>}
+ * @returns {Promise<{ secret: Uint8Array, client: Awaited<ReturnType<typeof
+ *   standingClientFromUnlockSeed>> }>}
  */
 async function backupCredential() {
   const secret = crypto.getRandomValues(new Uint8Array(32))
@@ -109,24 +110,24 @@ async function backupCredential() {
 }
 
 /**
- * A sink that accepts everything and counts the rows it saw.
- * @returns {MigrationSink & { rows: unknown[] }}
+ * A sink that accepts everything and counts the Resources it saw.
+ * @returns {MigrationSink & { resources: unknown[] }}
  */
-function acceptingSink(): MigrationSink & { rows: unknown[] } {
-  const rows: unknown[] = []
+function acceptingSink(): MigrationSink & { resources: unknown[] } {
+  const resources: unknown[] = []
 
   /**
    * @param options {object}
-   * @param options.row {unknown}
+   * @param options.json {unknown}
    * @returns {Promise<SinkOutcome>}
    */
-  async function record({ row }: { row: unknown }): Promise<SinkOutcome> {
-    rows.push(row)
+  async function record({ json }: { json: unknown }): Promise<SinkOutcome> {
+    resources.push(json)
     return 'accepted'
   }
 
   return {
-    rows,
+    resources,
     importCredential: record,
     importContact: record,
     importContactRevision: record,
@@ -170,10 +171,10 @@ async function oneCollectionBundle({
           collectionId: CONTACTS_COLLECTION,
           body: logBody(encryption)
         }),
-        ...(await encryptRows({
+        ...(await encryptResources({
           collectionId: CONTACTS_COLLECTION,
           encryption,
-          rows: [{ contactId: 'c-1' }]
+          resources: [{ contactId: 'c-1' }]
         }))
       ]
     })
@@ -212,7 +213,7 @@ describe('migrateBundle secrets', () => {
       secret: { passphrase: PASSPHRASE },
       sink
     })
-    expect(sink.rows).toEqual([{ contactId: 'c-1' }])
+    expect(sink.resources).toEqual([{ contactId: 'c-1' }])
     expect(report.collections[CONTACTS_COLLECTION]!.accepted).toBe(1)
   }, 120000)
 
@@ -228,7 +229,7 @@ describe('migrateBundle secrets', () => {
       secret: { packedCredential: {} },
       sink
     })
-    expect(sink.rows).toEqual([{ contactId: 'c-1' }])
+    expect(sink.resources).toEqual([{ contactId: 'c-1' }])
   }, 120000)
 
   it('opens the bundle with a sealed packed backup credential', async () => {
@@ -246,7 +247,7 @@ describe('migrateBundle secrets', () => {
       secret: { packedCredential: { exportPassphrase: EXPORT_PASSPHRASE } },
       sink
     })
-    expect(sink.rows).toEqual([{ contactId: 'c-1' }])
+    expect(sink.resources).toEqual([{ contactId: 'c-1' }])
   }, 120000)
 
   it('derives the same recipient as BACKUP_CREDENTIAL_KDF directly', async () => {

@@ -8,12 +8,12 @@
  * tree carry two distinct classes for the same failure.
  *
  * `BundleInvalidError` is defined in `@interop/space-archive` and re-exported
- * here, since that package's per-Space archive reader raises the same class
- * for the same reason: bytes that will not read back as a tar of the expected
+ * here, since that package's per-Space archive reader raises the same class for
+ * the same reason: bytes that will not read back as a tar of the expected
  * shape. Along with the next two below, it is raised before any content is
  * handed to a sink -- a bundle that cannot be opened at all. The last two are
- * reported per row or per collection by the migration walk, which carries on
- * with the rest.
+ * reported per Resource or per collection by the migration walk, which carries
+ * on with the rest.
  */
 export { BundleInvalidError } from '@interop/space-archive'
 
@@ -32,9 +32,9 @@ export class AccountSpaceArchiveMissingError extends Error {
 
 /**
  * The secret in hand is not a recipient of the bundle's user key: unwrapping
- * the roster's generations for it yielded none. Raised before any row is
+ * the roster's generations for it yielded none. Raised before any Resource is
  * decrypted, so a wrong passphrase or recovery code fails the whole walk
- * rather than emptying it row by row.
+ * rather than emptying it Resource by Resource.
  */
 export class BundleRecipientMissingError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -45,8 +45,8 @@ export class BundleRecipientMissingError extends Error {
 
 /**
  * A Collection's governing history log could not be read, so its encryption
- * descriptor is unknown and its rows cannot be opened. Reported against that
- * collection and the collection is skipped; the walk continues.
+ * descriptor is unknown and its Resources cannot be opened. Reported against
+ * that collection and the collection is skipped; the walk continues.
  */
 export class CollectionLogUnreadableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -57,7 +57,8 @@ export class CollectionLogUnreadableError extends Error {
 
 /**
  * A Resource is stored in chunks, which the migration walk does not open.
- * Reported as that one row's cause; the rest of the collection is migrated.
+ * Reported as that one Resource's cause; the rest of the collection is
+ * migrated.
  */
 export class ChunkedResourceUnsupportedError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

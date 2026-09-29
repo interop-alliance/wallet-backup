@@ -65,28 +65,28 @@ pnpm install
 ### Migrating a backup bundle into a new account
 
 `migrateBundle` reads a bundle's account Space archive, recovers the old user
-key from one old secret, decrypts each standard collection's rows, and pushes
-them one at a time at a sink you supply. With the optional `appCollections`
-member, the sink also takes the app collections: every collection outside the
-wallet Space's own layout, encrypted or plaintext. It issues no HTTP request and
-holds no collection in memory; each sink call is awaited before the next row is
-decrypted.
+key from one old secret, decrypts each standard collection's Resources, and
+pushes them one at a time at a sink you supply. With the optional
+`appCollections` member, the sink also takes the app collections: every
+collection outside the wallet Space's own layout, encrypted or plaintext. It
+issues no HTTP request and holds no collection in memory; each sink call is
+awaited before the next Resource is decrypted.
 
 ```js
 import { migrateBundle } from '@interop/wallet-backup'
 
 const sink = {
-  async importContact({ collectionId, resourceId, row }) {
-    return store.hasContact(row.contactId) ? 'skipped' : store.addContact(row)
+  async importContact({ collectionId, resourceId, json }) {
+    return store.hasContact(json.contactId) ? 'skipped' : store.addContact(json)
   },
-  async importContactRevision({ row }) {
-    return store.addContactRevision(row)
+  async importContactRevision({ json }) {
+    return store.addContactRevision(json)
   },
-  async importCredential({ row }) {
-    return store.addCredential(row)
+  async importCredential({ json }) {
+    return store.addCredential(json)
   },
-  async importActivity({ row }) {
-    return store.addActivity(row)
+  async importActivity({ json }) {
+    return store.addActivity(json)
   },
   // Optional. Without it, app collections are counted in `notMigrated`.
   appCollections: {
@@ -105,9 +105,9 @@ const sink = {
         indexSchema
       })
     },
-    async importRow(options) {
-      // `row` for a JSON content type, `bytes` for any other
-      return store.putRow(options)
+    async importResource(options) {
+      // `json` for a JSON content type, `bytes` for any other
+      return store.putResource(options)
     }
   }
 }
@@ -129,15 +129,15 @@ report.manifest // the bundle manifest minus its `contents`
 ```
 
 Each import function returns `accepted`, `skipped`, `conflicting` or `failed`. A
-method that throws counts as a failed row and the walk carries on; ten
+method that throws counts as a failed Resource and the walk carries on; ten
 consecutive failures end that collection (its report entry names the cause under
 `stoppedBy`) and the walk moves to the next. A throw named `QuotaExceededError`
 ends the whole walk, and `report.stoppedAt` names where.
 
 The walk order is contacts, contact history, credentials, then the app
 collections by id, then activity last. `ensureCollection` runs once per app
-collection before its first row is opened. `encrypted` is false only when the
-archived metadata file exists, parses, and declares no `encryption`, and the
+collection before its first Resource is opened. `encrypted` is false only when
+the archived metadata file exists, parses, and declares no `encryption`, and the
 collection carries no governing collection log. An encrypted collection with no
 log stops under `CollectionLogUnreadableError` before `ensureCollection`. That
 includes one whose metadata file is missing or does not parse. `isPublic` is
@@ -150,16 +150,16 @@ index, or it will not open, and the collection still migrates. `custom` is a
 plaintext collection's archived metadata `custom`, handed on as archived. An
 encrypted collection's `custom` is sealed to the old account's keys and is not
 handed on. A throw from `ensureCollection` stops that collection, with its name
-under `stoppedBy`, and no row of it is handed over. Any collection stopped
-before its first row, this way or for a missing log, counts its rows as
-`unopenable` under the stopping cause. A throw named `QuotaExceededError` ends
-the whole walk. `importRow` follows the rules above. It receives
-`{ collectionId, resourceId, contentType }` plus the row. An encrypted
-collection's row arrives decrypted as `row`, under `application/json`. A
-plaintext one's arrives as `row`, parsed, when its content type is
-`application/json` or an `application/...+json` type, and as raw `bytes`
-otherwise. Both keep their archived `resourceId`. `app-connections` is part of
-the wallet layout and is not migrated yet.
+under `stoppedBy`, and no Resource of it is handed over. Any collection stopped
+before its first Resource, this way or for a missing log, counts its Resources
+as `unopenable` under the stopping cause. A throw named `QuotaExceededError`
+ends the whole walk. `importResource` follows the rules above. It receives
+`{ collectionId, resourceId, contentType }` plus the Resource's payload. An
+encrypted collection's Resource arrives decrypted as `json`, under
+`application/json`. A plaintext one's arrives as `json`, parsed, when its
+content type is `application/json` or an `application/...+json` type, and as raw
+`bytes` otherwise. Both keep their archived `resourceId`. `app-connections` is
+part of the wallet layout and is not migrated yet.
 
 The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 `{ packedCredential: { exportPassphrase } }`. The last reads the bundle's own
@@ -167,7 +167,7 @@ The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 export passphrase, and derives the backup credential's standing identity from
 its 32 secret bytes through wallet-core's `BACKUP_CREDENTIAL_KDF`. A secret that
 is a recipient of nothing in the archived user key roster is refused with
-`BundleRecipientMissingError` before any row is written.
+`BundleRecipientMissingError` before any Resource is written.
 
 ### Exporting a bundle
 

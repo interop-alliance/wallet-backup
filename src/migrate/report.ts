@@ -15,14 +15,14 @@ import type { BundleManifestSummary } from '../bundle/manifest.js'
 import type { SinkOutcome } from './sink.js'
 
 /**
- * One collection's counts. `unopenable` rows never reached the sink: no held
- * user key generation opened them, the Resource is chunked, or the collection
- * was stopped before its first row (its `stoppedBy` then names the cause).
- * `unopenableCauses` names why, by error name, with the number of rows each
- * name accounts for. `stoppedBy` is present only when a run of consecutive
- * failures ended the collection, carrying the last cause's name (or the
- * outcome word `failed` when the sink reported failure without throwing), or
- * when the collection was stopped before its first row.
+ * One collection's counts. `unopenable` Resources never reached the sink: no
+ * held user key generation opened them, the Resource is chunked, or the
+ * collection was stopped before its first Resource (its `stoppedBy` then names
+ * the cause). `unopenableCauses` names why, by error name, with the number of
+ * Resources each name accounts for. `stoppedBy` is present only when a run of
+ * consecutive failures ended the collection, carrying the last cause's name (or
+ * the outcome word `failed` when the sink reported failure without throwing),
+ * or when the collection was stopped before its first Resource.
  */
 export interface MigrationCollectionReport {
   accepted: number
@@ -36,10 +36,10 @@ export interface MigrationCollectionReport {
 
 /**
  * What one walk did. A collection the walk never entered is absent from
- * `collections`, so a present entry means the walk got that far. `stoppedAt`
- * is present only when a quota refusal stopped the whole walk.
- * `notMigrated` counts the rows of every collection the walk carries no import
- * function for, by collection id, and no sink method saw any of them.
+ * `collections`, so a present entry means the walk got that far. `stoppedAt` is
+ * present only when a quota refusal stopped the whole walk. `notMigrated`
+ * counts the Resources of every collection the walk carries no import function
+ * for, by collection id, and no sink method saw any of them.
  */
 export interface MigrationReport {
   manifest: BundleManifestSummary
@@ -52,10 +52,10 @@ export interface MigrationReport {
  * Turns a tally keyed by a name the bundle chose into the record the report
  * carries. The keys come out of an archive, so a plain object literal would
  * silently lose a collection named `__proto__`: the assignment reaches the
- * prototype setter rather than creating a property, and that collection's rows
- * would go uncounted. Accumulating in a `Map` and converting here keeps every
- * name countable, and the null prototype keeps the result safe for a consumer
- * that indexes it by a name it did not choose either.
+ * prototype setter rather than creating a property, and that collection's
+ * Resources would go uncounted. Accumulating in a `Map` and converting here
+ * keeps every name countable, and the null prototype keeps the result safe for
+ * a consumer that indexes it by a name it did not choose either.
  *
  * @param counts {Map<string, TValue>}
  * @returns {Record<string, TValue>}
@@ -97,7 +97,7 @@ export class CollectionTally {
   }
 
   /**
-   * Records one row no key opened, under the error name that explains it.
+   * Records one Resource no key opened, under the error name that explains it.
    * @param cause {string}   the error name
    * @returns {void}
    */

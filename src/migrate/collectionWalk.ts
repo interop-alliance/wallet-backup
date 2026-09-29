@@ -2,18 +2,18 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * One migrated collection's pass: read a row's envelope, open it with the
+ * One migrated collection's pass: read a Resource's envelope, open it with the
  * newest generation that can, hand the plaintext to the sink, and tally what
- * happened. A plaintext collection's rows need no opening: a JSON body is
- * handed on parsed, and any other content type as its archived bytes. The
- * pass holds one row at a time -- it awaits the sink before it reads the next
+ * happened. A plaintext collection's Resources need no opening: a JSON body is
+ * handed on parsed, and any other content type as its archived bytes. The pass
+ * holds one Resource at a time -- it awaits the sink before it reads the next
  * entry -- and issues no request of its own, since the ciphers it was handed
  * carry no transport.
  *
  * Two rules end something early. A run of consecutive failures ends this
- * collection (an outage, not a row that will never land), and the walk moves
- * on. A sink throw named for the server's quota refusal ends the whole walk,
- * which this pass reports back to its caller rather than deciding.
+ * collection (an outage, not a Resource that will never land), and the walk
+ * moves on. A sink throw named for the server's quota refusal ends the whole
+ * walk, which this pass reports back to its caller rather than deciding.
  */
 import {
   classifyCollectionFile,
@@ -25,48 +25,48 @@ import { ChunkedResourceUnsupportedError } from '../errors.js'
 import type { ByteSource } from '@interop/space-archive'
 import type { CollectionTally } from './report.js'
 import { MAX_CONSECUTIVE_FAILURES, WALK_STOPPING_ERROR_NAME } from './sink.js'
-import type { AppCollectionRow, SinkOutcome } from './sink.js'
+import type { AppCollectionResource, SinkOutcome } from './sink.js'
 
 /**
  * A decrypting cipher for one generation, as `ciphersForCollection` builds it.
  */
-type RowCipher = {
+type ResourceCipher = {
   decrypt: (options: { id: string; envelope: never }) => Promise<unknown>
 }
 
 /**
- * What one row's open produced: the plaintext, or the error name that explains
- * why no held generation opened it.
+ * What one Resource's open produced: the plaintext, or the error name that
+ * explains why no held generation opened it.
  */
-type OpenedRow = { row: unknown } | { cause: string }
+type OpenedResource = { json: unknown } | { cause: string }
 
 /**
  * Opens one envelope, newest generation first. A `KeyUnwrapError` is the
- * fallback signal -- this generation holds no key for that row's epoch -- and
- * the next generation is tried. Anything else is this row's answer: an
+ * fallback signal -- this generation holds no key for that Resource's epoch --
+ * and the next generation is tried. Anything else is this Resource's answer: an
  * `UnknownEpochError` means the descriptor lists no such epoch, which no other
  * generation can change.
  *
  * @param options {object}
- * @param options.ciphers {RowCipher[]}   newest generation first
+ * @param options.ciphers {ResourceCipher[]}   newest generation first
  * @param options.resourceId {string}   the id the envelope is bound to
  * @param options.envelope {unknown}
- * @returns {Promise<OpenedRow>}
+ * @returns {Promise<OpenedResource>}
  */
-async function openRow({
+async function openResource({
   ciphers,
   resourceId,
   envelope
 }: {
-  ciphers: RowCipher[]
+  ciphers: ResourceCipher[]
   resourceId: string
   envelope: unknown
-}): Promise<OpenedRow> {
+}): Promise<OpenedResource> {
   let lastCause = 'KeyUnwrapError'
   for (const cipher of ciphers) {
     try {
       return {
-        row: await cipher.decrypt({
+        json: await cipher.decrypt({
           id: resourceId,
           envelope: envelope as never
         })
@@ -90,24 +90,24 @@ async function openRow({
  * error's name.
  *
  * @param options {object}
- * @param options.ciphers {RowCipher[] | undefined}   newest generation first;
- *   `undefined` for a plaintext collection
+ * @param options.ciphers {ResourceCipher[] | undefined}   newest generation
+ *   first; `undefined` for a plaintext collection
  * @param options.resourceId {string}
  * @param options.contentType {string}   the archived representation's type
  * @param options.bytes {Uint8Array}   the archived representation's body
- * @returns {Promise<OpenedRow | { bytes: Uint8Array }>}
+ * @returns {Promise<OpenedResource | { bytes: Uint8Array }>}
  */
-async function readRow({
+async function readResource({
   ciphers,
   resourceId,
   contentType,
   bytes
 }: {
-  ciphers: RowCipher[] | undefined
+  ciphers: ResourceCipher[] | undefined
   resourceId: string
   contentType: string
   bytes: Uint8Array
-}): Promise<OpenedRow | { bytes: Uint8Array }> {
+}): Promise<OpenedResource | { bytes: Uint8Array }> {
   if (ciphers === undefined && !isJsonContentType(contentType)) {
     return { bytes }
   }
@@ -118,25 +118,25 @@ async function readRow({
     return { cause: (err as Error).name }
   }
   if (ciphers === undefined) {
-    return { row: body }
+    return { json: body }
   }
-  return openRow({ ciphers, resourceId, envelope: body })
+  return openResource({ ciphers, resourceId, envelope: body })
 }
 
 /**
- * Walks one migrated collection's rows.
+ * Walks one migrated collection's Resources.
  *
  * @param options {object}
  * @param options.archive {ByteSource}   the account Space archive's bytes
  * @param options.collectionId {string}
- * @param options.importRow {function}   the sink function this collection's
- *   rows go to
- * @param options.ciphers {RowCipher[] | undefined}   one per generation,
+ * @param options.importResource {function}   the sink function this
+ *   collection's Resources go to
+ * @param options.ciphers {ResourceCipher[] | undefined}   one per generation,
  *   newest first; `undefined` for a plaintext collection
  * @param options.chunked {ReadonlySet<string>}   the collection's chunk-stored
  *   Resource ids, which this walk does not open
  * @param options.tally {CollectionTally}   filled in as the pass goes
- * @param [options.signal] {AbortSignal}   checked between rows
+ * @param [options.signal] {AbortSignal}   checked between Resources
  * @param [options.onProgress] {function}
  * @returns {Promise<{ stopped?: string }>}   the cause name when a quota
  *   refusal ended the whole walk
@@ -144,7 +144,7 @@ async function readRow({
 export async function walkCollection({
   archive,
   collectionId,
-  importRow,
+  importResource,
   ciphers,
   chunked,
   tally,
@@ -153,8 +153,8 @@ export async function walkCollection({
 }: {
   archive: ByteSource
   collectionId: string
-  importRow: (options: AppCollectionRow) => Promise<SinkOutcome>
-  ciphers: RowCipher[] | undefined
+  importResource: (options: AppCollectionResource) => Promise<SinkOutcome>
+  ciphers: ResourceCipher[] | undefined
   chunked: ReadonlySet<string>
   tally: CollectionTally
   signal?: AbortSignal
@@ -168,7 +168,8 @@ export async function walkCollection({
   let consecutiveFailures = 0
 
   /**
-   * Records one row's outcome and reports it to the caller's progress hook.
+   * Records one Resource's outcome and reports it to the caller's progress
+   * hook.
    * @param outcome {SinkOutcome | 'unopenable'}
    * @returns {void}
    */
@@ -200,7 +201,7 @@ export async function walkCollection({
       continue
     }
     const { resourceId, contentType } = file
-    const handed = await readRow({
+    const handed = await readResource({
       ciphers,
       resourceId,
       contentType,
@@ -214,10 +215,10 @@ export async function walkCollection({
 
     let outcome: SinkOutcome
     try {
-      outcome = await importRow({
+      outcome = await importResource({
         collectionId,
         resourceId,
-        // A decrypted row is JSON; the archived type names the envelope's.
+        // A decrypted Resource is JSON; the archived type names the envelope's.
         contentType: ciphers === undefined ? contentType : 'application/json',
         ...handed
       })
