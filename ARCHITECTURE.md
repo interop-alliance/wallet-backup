@@ -282,7 +282,4 @@ The dependency direction inside this package is one way: `migrate/` reads
 
 ## Current State labels
 
-- Transitional: the `@interop/was-client` devDependency is a local
-  `link:../was-client` reference until its 0.80.0 release, which carries the
-  `chunkSource` option and the `blobBytes` export. Every other `@interop/*`
-  dependency is consumed from the npm registry.
+- Every `@interop/*` dependency is consumed from the npm registry.

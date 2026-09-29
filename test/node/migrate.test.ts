@@ -44,6 +44,7 @@ import {
   parseResourceFileName
 } from '@interop/space-archive'
 import {
+  exportBundle,
   migrateBundle,
   packBackupCredential,
   writeBundle,
@@ -185,18 +186,39 @@ function policyFile(body: string): { name: string; bytes: Uint8Array } {
  * @returns {Promise<Uint8Array>}
  */
 async function fixtureBundle({
+  backupCredential,
+  ...space
+}: Parameters<typeof fixtureSpaceEntries>[0] & {
+  backupCredential?: unknown
+}): Promise<Uint8Array> {
+  return buildBundle({
+    entries: await fixtureSpaceEntries(space),
+    ...(backupCredential !== undefined && { backupCredential })
+  })
+}
+
+/**
+ * The account Space's entry tree a fixture bundle packs: a user key roster
+ * wrapped to the given recipients, then one archive directory per collection.
+ *
+ * @param options {object}
+ * @param options.generations {Generation[]}   oldest first
+ * @param options.recipients {RecipientPublicKey[]}
+ * @param options.collections {FixtureCollection[]}
+ * @param [options.rosterWithoutWrapFor] {ReadonlySet<string>}
+ * @returns {Promise<ArchiveEntry[]>}
+ */
+async function fixtureSpaceEntries({
   generations,
   recipients,
   collections,
-  rosterWithoutWrapFor,
-  backupCredential
+  rosterWithoutWrapFor
 }: {
   generations: Generation[]
   recipients: RecipientPublicKey[]
   collections: FixtureCollection[]
   rosterWithoutWrapFor?: ReadonlySet<string>
-  backupCredential?: unknown
-}): Promise<Uint8Array> {
+}): Promise<ArchiveEntry[]> {
   const roster = await rosterDescriptor({
     generations,
     recipients,
@@ -271,10 +293,7 @@ async function fixtureBundle({
       })
     )
   }
-  return buildBundle({
-    entries,
-    ...(backupCredential !== undefined && { backupCredential })
-  })
+  return entries
 }
 
 /**
@@ -1838,6 +1857,77 @@ describe('migrateBundle', () => {
           bytes: json
         })
         expect(report.collections['photos']).toEqual(tally({ accepted: 4 }))
+      })
+
+      it('migrates a chunked Resource out of a bundle exportBundle streams', async () => {
+        const video = bytesOf(24 * 11 + 5, 17)
+        const [generation] = await mintGenerations(1)
+        const secret = crypto.getRandomValues(new Uint8Array(32))
+        const client = await standingClientFromUnlockSeed({
+          unlockSeed: await deriveUnlockSeed({
+            secret,
+            kdf: BACKUP_CREDENTIAL_KDF
+          })
+        })
+        let videoId = ''
+        const entries = await fixtureSpaceEntries({
+          generations: [generation!],
+          recipients: [recipientFor(client.agents.keyAgreementKey)],
+          collections: [
+            {
+              collectionId: 'photos',
+              resources: [{ note: 'one' }],
+              openedBy: [[generation!]],
+              async sealedEntries(encryption) {
+                const [sealed] = await sealBinaryResources({
+                  collectionId: 'photos',
+                  encryption,
+                  generation: generation!,
+                  resources: [{ data: video, contentType: 'video/mp4' }]
+                })
+                videoId = sealed!.id
+                expect(sealed!.chunks.length).toBeGreaterThan(10)
+                return [
+                  sealed!.representation,
+                  chunkDirWith({
+                    resourceId: sealed!.id,
+                    files: sealed!.chunks
+                  })
+                ]
+              }
+            }
+          ]
+        })
+        const archive = await collectBytes(
+          (await packSpaceArchive({
+            spaceId: FIXTURE_SPACE_ID,
+            entries
+          })) as unknown as AsyncIterable<Uint8Array>
+        )
+        const bundle = await exportBundle({
+          meta: FIXTURE_META,
+          establishBackupCredential: async () => secret.slice(),
+          listSpaces: async () => [
+            {
+              spaceId: FIXTURE_SPACE_ID,
+              role: BUNDLE_ROLE.accountSpaceArchive
+            }
+          ],
+          exportSpace: async () => archive
+        })
+        const sink = appRecordingSink()
+        const report = await migrateBundle({
+          bundle,
+          secret: { packedCredential: {} },
+          sink
+        })
+        expect(byId(sink).get(videoId)).toEqual({
+          collectionId: 'photos',
+          resourceId: videoId,
+          contentType: 'video/mp4',
+          bytes: video
+        })
+        expect(report.collections['photos']).toEqual(tally({ accepted: 2 }))
       })
 
       it('reassembles ten or more chunks in index order and skips sidecars in either order', async () => {
