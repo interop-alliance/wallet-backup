@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest'
 import {
   collectBytes,
   packSpaceArchive,
-  readSpaceArchive
+  readSpaceArchive,
+  EXPORT_ENTRY_MTIME
 } from '@interop/space-archive'
 import {
   accountSpaceArchive,
@@ -20,26 +21,33 @@ import {
 import type { Bundle, BundleMeta, ByteSource } from '../../src/index.js'
 
 /**
- * The fixture Space's id, packed below into a minimal archive: this suite
- * exercises the bundle codec, not the archive layout, so the archive's
+ * The fixture account Space's id, packed below into a minimal archive: this
+ * suite exercises the bundle codec, not the archive layout, so the archive's
  * content beyond its Space id is not load-bearing here.
  */
 const FIXTURE_SPACE_ID = 'zFixtureSpace'
 
 /**
+ * The fixture unlock Space's id. Its archive is packed under its own id, so
+ * the two archives in a fixture bundle differ byte for byte.
+ */
+const UNLOCK_SPACE_ID = 'zUnlockSpace'
+
+/**
  * Packs a minimal Space archive for wrapping in a bundle.
+ * @param [spaceId] {string}
  * @returns {Promise<Uint8Array>}
  */
-async function packFixtureArchive(): Promise<Uint8Array> {
+async function packFixtureArchive(
+  spaceId: string = FIXTURE_SPACE_ID
+): Promise<Uint8Array> {
   return collectBytes(
     (await packSpaceArchive({
-      spaceId: FIXTURE_SPACE_ID,
+      spaceId,
       entries: [
         {
-          name: `.space.${FIXTURE_SPACE_ID}.json`,
-          bytes: new TextEncoder().encode(
-            JSON.stringify({ id: FIXTURE_SPACE_ID })
-          )
+          name: `.space.${spaceId}.json`,
+          bytes: new TextEncoder().encode(JSON.stringify({ id: spaceId }))
         }
       ]
     })) as unknown as AsyncIterable<Uint8Array>
@@ -66,32 +74,61 @@ async function packedBytes(
 }
 
 /**
- * Writes a two-Space bundle over the fixture archive.
- * @param [backupCredential] {unknown}
+ * Writes a two-Space bundle, each Space over its own fixture archive.
+ * @param [options] {object}
+ * @param [options.backupCredential] {unknown}
+ * @param [options.unlockFirst] {boolean}   packs the unlock Space ahead of the
+ *   account Space
  * @returns {Promise<Uint8Array>}
  */
-async function writeFixtureBundle(
+async function writeFixtureBundle({
+  backupCredential,
+  unlockFirst = false
+}: {
   backupCredential?: unknown
-): Promise<Uint8Array> {
-  const archive = await packFixtureArchive()
+  unlockFirst?: boolean
+} = {}): Promise<Uint8Array> {
+  const account = {
+    spaceId: FIXTURE_SPACE_ID,
+    role: BUNDLE_ROLE.accountSpaceArchive,
+    archive: await packFixtureArchive(FIXTURE_SPACE_ID)
+  }
+  const unlock = {
+    spaceId: UNLOCK_SPACE_ID,
+    role: BUNDLE_ROLE.unlockSpaceArchive,
+    archive: await packFixtureArchive(UNLOCK_SPACE_ID)
+  }
   return packedBytes(
     writeBundle({
       meta,
-      spaces: [
-        {
-          spaceId: FIXTURE_SPACE_ID,
-          role: BUNDLE_ROLE.accountSpaceArchive,
-          archive
-        },
-        {
-          spaceId: 'zUnlockSpace',
-          role: BUNDLE_ROLE.unlockSpaceArchive,
-          archive
-        }
-      ],
+      spaces: unlockFirst ? [unlock, account] : [account, unlock],
       ...(backupCredential === undefined ? {} : { backupCredential })
     })
   )
+}
+
+/**
+ * Reads the header `mtime` of every entry in a tar.
+ * @param bytes {Uint8Array}
+ * @returns {Promise<Array<{ name: string, mtime: Date | undefined }>>}
+ */
+async function entryMtimes(
+  bytes: Uint8Array
+): Promise<{ name: string; mtime: Date | undefined }[]> {
+  const extract = tar.extract()
+  const headers: { name: string; mtime: Date | undefined }[] = []
+  const done = new Promise<void>((resolve, reject) => {
+    extract.on('entry', (header, stream, next) => {
+      headers.push({ name: header.name, mtime: header.mtime })
+      stream.on('end', next)
+      stream.resume()
+    })
+    extract.on('finish', resolve)
+    extract.on('error', reject)
+  })
+  extract.end(bytes)
+  await done
+  return headers
 }
 
 /**
@@ -186,7 +223,7 @@ describe('writeBundle and readBundle', () => {
       form: 'plain',
       secret: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
     }
-    const bytes = await writeFixtureBundle(packed)
+    const bytes = await writeFixtureBundle({ backupCredential: packed })
     const bundle = await readBundle(bytes)
 
     expect(bundle.manifest['ubc-version']).toBe('0.1')
@@ -201,8 +238,30 @@ describe('writeBundle and readBundle', () => {
       spec: bundle.manifest.spec
     })
     expect(BACKUP_CREDENTIAL_FILE).toBe('backup-credential.json')
-    expect(bundle.manifest.contents['backup-credential.json']).toEqual({
-      url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#packed-backup-credential'
+    // The role anchors are permanent wire text, so they are pinned here as
+    // literals rather than through the constants that write them.
+    expect(bundle.manifest.contents).toEqual({
+      'manifest.yml': {
+        url: 'https://codeberg.org/fediverse/fep/src/branch/main/fep/6fcd/fep-6fcd.md#manifest-file'
+      },
+      'backup-credential.json': {
+        url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#packed-backup-credential'
+      },
+      spaces: {
+        url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#space-archives',
+        contents: [
+          {
+            'zFixtureSpace.tar': {
+              url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#account-space-archive'
+            }
+          },
+          {
+            'zUnlockSpace.tar': {
+              url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#unlock-space-archive'
+            }
+          }
+        ]
+      }
     })
     expect(
       JSON.parse(
@@ -211,20 +270,33 @@ describe('writeBundle and readBundle', () => {
     ).toEqual(packed)
     expect([...bundle.roles.entries()]).toEqual([
       [`spaces/${FIXTURE_SPACE_ID}.tar`, BUNDLE_ROLE.accountSpaceArchive],
-      ['spaces/zUnlockSpace.tar', BUNDLE_ROLE.unlockSpaceArchive]
+      [`spaces/${UNLOCK_SPACE_ID}.tar`, BUNDLE_ROLE.unlockSpaceArchive]
     ])
 
     const walked: string[] = []
     for await (const space of bundle.spaces) {
       walked.push(space.spaceId)
-      await space.bytes()
+      const archive = await space.bytes()
+      expect(
+        Buffer.from(archive).equals(
+          Buffer.from(await packFixtureArchive(space.spaceId))
+        )
+      ).toBe(true)
     }
-    expect(walked).toEqual([FIXTURE_SPACE_ID, 'zUnlockSpace'])
+    expect(walked).toEqual([FIXTURE_SPACE_ID, UNLOCK_SPACE_ID])
   })
 
   it('hands back the account Space archive verbatim', async () => {
-    const archive = await packFixtureArchive()
-    const bundle = await readBundle(await writeFixtureBundle())
+    const archive = await packFixtureArchive(FIXTURE_SPACE_ID)
+    // The unlock Space is packed first, so the account Space archive is found
+    // by its role rather than by its position.
+    const bundle = await readBundle(
+      await writeFixtureBundle({ unlockFirst: true })
+    )
+    expect([...bundle.roles.keys()]).toEqual([
+      `spaces/${UNLOCK_SPACE_ID}.tar`,
+      `spaces/${FIXTURE_SPACE_ID}.tar`
+    ])
     const found = await accountSpaceArchive(bundle)
     expect(Buffer.from(found).equals(Buffer.from(archive))).toBe(true)
 
@@ -242,13 +314,28 @@ describe('writeBundle and readBundle', () => {
     const bundle = await readBundle(chunks())
     expect(bundle.manifest['ubc-version']).toBe('0.1')
     const found = await accountSpaceArchive(bundle)
-    expect(found.byteLength).toBeGreaterThan(0)
+    const archive = await packFixtureArchive(FIXTURE_SPACE_ID)
+    expect(Buffer.from(found).equals(Buffer.from(archive))).toBe(true)
   })
 
   it('is byte-reproducible across two writes', async () => {
-    const first = await writeFixtureBundle()
-    const second = await writeFixtureBundle()
+    const first = await writeFixtureBundle({ backupCredential: { form: 'x' } })
+    const second = await writeFixtureBundle({ backupCredential: { form: 'x' } })
     expect(Buffer.from(second).equals(Buffer.from(first))).toBe(true)
+
+    // Two writes a few milliseconds apart share a whole-second clock reading,
+    // so the equality above alone does not prove the headers are pinned.
+    const headers = await entryMtimes(first)
+    expect(headers.map(header => header.name)).toEqual([
+      'manifest.yml',
+      'backup-credential.json',
+      'spaces/',
+      `spaces/${FIXTURE_SPACE_ID}.tar`,
+      `spaces/${UNLOCK_SPACE_ID}.tar`
+    ])
+    for (const header of headers) {
+      expect(header.mtime?.getTime()).toBe(EXPORT_ENTRY_MTIME.getTime())
+    }
   })
 })
 
@@ -298,13 +385,20 @@ describe('writeBundle stopping', () => {
   it('skips settle once the writer has stopped', async () => {
     const controller = new AbortController()
     let settled = false
+    const archive = await packFixtureArchive()
+    // The abort lands once the archive's last chunk is taken, so the
+    // collection completes and the writer reaches settle already stopped.
+    async function* abortingArchive(): AsyncGenerator<Uint8Array> {
+      yield archive
+      controller.abort(new Error('the user cancelled'))
+    }
     const stream = writeBundle({
       meta,
       spaces: [
         {
           spaceId: FIXTURE_SPACE_ID,
           role: BUNDLE_ROLE.accountSpaceArchive,
-          archive: await packFixtureArchive()
+          archive: abortingArchive()
         }
       ],
       async settle() {
@@ -312,7 +406,6 @@ describe('writeBundle stopping', () => {
       },
       signal: controller.signal
     })
-    controller.abort(new Error('the user cancelled'))
 
     const err = await collectBytes(stream).catch((err: unknown) => err)
     expect((err as Error).message).toBe('the user cancelled')
@@ -323,26 +416,38 @@ describe('writeBundle stopping', () => {
 describe('bundle refusals', () => {
   it('refuses bytes that are not a tar', async () => {
     const bytes = new TextEncoder().encode('not a tar archive at all')
-    expect(await errorName(() => readBundle(bytes))).toBe('BundleInvalidError')
+    await expect(readBundle(bytes)).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringContaining('not a readable tar archive')
+    })
   })
 
   it('refuses a tar with no manifest', async () => {
     const bytes = await packRaw([{ name: 'readme.txt', body: 'hello' }])
-    expect(await errorName(() => readBundle(bytes))).toBe('BundleInvalidError')
+    await expect(readBundle(bytes)).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringContaining('does not open with a "manifest.yml"')
+    })
   })
 
   it('refuses an unparseable manifest', async () => {
     const bytes = await packRaw([
       { name: 'manifest.yml', body: '::: not : yaml :\n  - [' }
     ])
-    expect(await errorName(() => readBundle(bytes))).toBe('BundleInvalidError')
+    await expect(readBundle(bytes)).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringContaining('manifest is not valid YAML')
+    })
   })
 
   it('refuses a manifest with no ubc-version', async () => {
     const bytes = await packRaw([
       { name: 'manifest.yml', body: YAML.stringify({ contents: {} }) }
     ])
-    expect(await errorName(() => readBundle(bytes))).toBe('BundleInvalidError')
+    await expect(readBundle(bytes)).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringContaining('carries no "ubc-version"')
+    })
   })
 
   it('refuses a bundle whose manifest names no account Space archive', async () => {
@@ -384,9 +489,15 @@ describe('bundle refusals', () => {
       { name: 'spaces/zOther.tar', body: 'not the one' }
     ])
     const bundle: Bundle = await readBundle(bytes)
-    expect(await errorName(() => accountSpaceArchive(bundle))).toBe(
-      'AccountSpaceArchiveMissingError'
-    )
+    // The hand-built manifest parsed, so the refusal below is the "names one
+    // it does not hold" branch rather than the "names none" one.
+    expect([...bundle.roles.entries()]).toEqual([
+      ['spaces/zAccount.tar', BUNDLE_ROLE.accountSpaceArchive]
+    ])
+    await expect(accountSpaceArchive(bundle)).rejects.toMatchObject({
+      name: 'AccountSpaceArchiveMissingError',
+      message: expect.stringContaining('"spaces/zAccount.tar"')
+    })
   })
 })
 

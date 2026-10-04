@@ -6,11 +6,11 @@
  * and a packed backup credential in the clear or sealed to an export
  * passphrase -- and the wipe the walk owes its caller when it ends.
  *
- * Both wallet-core subpaths the walk derives through are wrapped here rather
- * than replaced: the real functions run, and the wrapper keeps a reference to
- * the bytes they produced so the test can assert the walk zeroed them. A spy
- * is the only way to see that from outside, since the walk deliberately hands
- * no key material back.
+ * The wallet-core subpaths the walk derives through, and the backup credential
+ * unpack, are wrapped here rather than replaced: the real functions run, and
+ * the wrapper keeps a reference to the bytes they produced so the test can
+ * assert the walk zeroed them. A spy is the only way to see that from
+ * outside, since the walk deliberately hands no key material back.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -54,6 +54,21 @@ const recovered: Array<{ id: string; secret: Uint8Array }> = []
  */
 const seeds: Uint8Array[] = []
 
+/**
+ * Every client seed and binding MAC key a standing client derivation handed
+ * back during a test, same reason.
+ */
+const clientSecrets: Array<{
+  clientSeed: Uint8Array
+  bindingMacKey: Uint8Array
+}> = []
+
+/**
+ * Every credential secret `unpackBackupCredential` handed back during a test,
+ * same reason.
+ */
+const credentialSecrets: Uint8Array[] = []
+
 vi.mock(
   '@interop/wallet-core/keys/userKeyGenerations',
   async importOriginal => {
@@ -89,6 +104,64 @@ vi.mock('@interop/wallet-core/keyring/kdf', async importOriginal => {
   }
 })
 
+vi.mock('@interop/wallet-core/unlock/standingClient', async importOriginal => {
+  const original =
+    await importOriginal<
+      typeof import('@interop/wallet-core/unlock/standingClient')
+    >()
+  return {
+    ...original,
+    async standingClientFromUnlockSeed(
+      options: Parameters<typeof original.standingClientFromUnlockSeed>[0]
+    ) {
+      const client = await original.standingClientFromUnlockSeed(options)
+      clientSecrets.push({
+        clientSeed: client.clientSeed,
+        bindingMacKey: client.bindingMacKey
+      })
+      return client
+    }
+  }
+})
+
+vi.mock('../../src/bundle/backupCredential.js', async importOriginal => {
+  const original =
+    await importOriginal<
+      typeof import('../../src/bundle/backupCredential.js')
+    >()
+  return {
+    ...original,
+    async unpackBackupCredential(
+      options: Parameters<typeof original.unpackBackupCredential>[0]
+    ) {
+      const secret = await original.unpackBackupCredential(options)
+      credentialSecrets.push(secret)
+      return secret
+    }
+  }
+})
+
+/**
+ * Asserts every byte of every given array is zero.
+ * @param arrays {Uint8Array[]}
+ */
+function expectAllZeroed(arrays: Uint8Array[]): void {
+  for (const bytes of arrays) {
+    expect(bytes.every(byte => byte === 0)).toBe(true)
+  }
+}
+
+/**
+ * The recorded client seeds and binding MAC keys, as one flat list.
+ * @returns {Uint8Array[]}
+ */
+function clientSecretBytes(): Uint8Array[] {
+  return clientSecrets.flatMap(({ clientSeed, bindingMacKey }) => [
+    clientSeed,
+    bindingMacKey
+  ])
+}
+
 const PASSPHRASE = 'correct horse battery staple'
 const EXPORT_PASSPHRASE = 'an export passphrase'
 
@@ -110,28 +183,43 @@ async function backupCredential() {
 }
 
 /**
- * A sink that accepts everything and counts the Resources it saw.
- * @returns {MigrationSink & { resources: unknown[] }}
+ * A sink that accepts everything and records the Resources it saw, and which
+ * method each collection's Resources reached.
+ * @returns {MigrationSink & { resources: unknown[], calls: Array<{
+ *   collectionId: string, method: string }> }}
  */
-function acceptingSink(): MigrationSink & { resources: unknown[] } {
+function acceptingSink(): MigrationSink & {
+  resources: unknown[]
+  calls: Array<{ collectionId: string; method: string }>
+} {
   const resources: unknown[] = []
+  const calls: Array<{ collectionId: string; method: string }> = []
 
   /**
-   * @param options {object}
-   * @param options.json {unknown}
-   * @returns {Promise<SinkOutcome>}
+   * @param method {string}   the sink method name the recorder stands in for
+   * @returns {Function}   the recorder for that method
    */
-  async function record({ json }: { json: unknown }): Promise<SinkOutcome> {
-    resources.push(json)
-    return 'accepted'
+  function recorder(method: string) {
+    return async function record({
+      collectionId,
+      json
+    }: {
+      collectionId: string
+      json: unknown
+    }): Promise<SinkOutcome> {
+      calls.push({ collectionId, method })
+      resources.push(json)
+      return 'accepted'
+    }
   }
 
   return {
     resources,
-    importCredential: record,
-    importContact: record,
-    importContactRevision: record,
-    importActivity: record
+    calls,
+    importCredential: recorder('importCredential'),
+    importContact: recorder('importContact'),
+    importContactRevision: recorder('importContactRevision'),
+    importActivity: recorder('importActivity')
   }
 }
 
@@ -214,6 +302,9 @@ describe('migrateBundle secrets', () => {
       sink
     })
     expect(sink.resources).toEqual([{ contactId: 'c-1' }])
+    expect(sink.calls).toEqual([
+      { collectionId: CONTACTS_COLLECTION, method: 'importContact' }
+    ])
     expect(report.collections[CONTACTS_COLLECTION]!.accepted).toBe(1)
   }, 120000)
 
@@ -256,16 +347,20 @@ describe('migrateBundle secrets', () => {
     const files = new Map([
       [BACKUP_CREDENTIAL_FILE, new TextEncoder().encode(JSON.stringify(packed))]
     ])
+    credentialSecrets.length = 0
+    clientSecrets.length = 0
     const recipient = await recipientFromSecret({
       secret: { packedCredential: {} },
       files
     })
     expect(recipient.keyAgreementKey.id).toBe(client.agents.keyAgreementKey.id)
-    expect(recipientFor(recipient.keyAgreementKey)).toEqual(
-      recipientFor(client.agents.keyAgreementKey)
-    )
     // The credential's seed is wiped here rather than handed to the walk.
     expect(recipient.unlockSeed).toBeUndefined()
+    // So are the unpacked secret bytes and the standing client's byproducts.
+    expect(credentialSecrets).toHaveLength(1)
+    expectAllZeroed(credentialSecrets)
+    expect(clientSecrets).toHaveLength(1)
+    expectAllZeroed(clientSecretBytes())
   }, 120000)
 
   it('refuses a packed-credential secret when the bundle carries none', async () => {
@@ -291,20 +386,19 @@ describe('migrateBundle secrets', () => {
     // The seed derived to build the fixture is not the walk's; only the ones
     // the walk derives after this point are asserted on.
     seeds.length = 0
+    clientSecrets.length = 0
     await migrateBundle({
       bundle,
       secret: { passphrase: PASSPHRASE },
       sink: acceptingSink()
     })
 
-    expect(recovered.length).toBeGreaterThan(0)
-    for (const generation of recovered) {
-      expect(generation.secret.every(byte => byte === 0)).toBe(true)
-    }
-    expect(seeds.length).toBeGreaterThan(0)
-    for (const seed of seeds) {
-      expect(seed.every(byte => byte === 0)).toBe(true)
-    }
+    expect(recovered).toHaveLength(1)
+    expectAllZeroed(recovered.map(generation => generation.secret))
+    expect(seeds).toHaveLength(1)
+    expectAllZeroed(seeds)
+    expect(clientSecrets).toHaveLength(1)
+    expectAllZeroed(clientSecretBytes())
   }, 120000)
 
   it('zeroes the export passphrase and credential seeds on the packed-credential path', async () => {
@@ -325,21 +419,24 @@ describe('migrateBundle secrets', () => {
     })
     recovered.length = 0
     seeds.length = 0
+    clientSecrets.length = 0
+    credentialSecrets.length = 0
     await migrateBundle({
       bundle,
       secret: { packedCredential: { exportPassphrase: EXPORT_PASSPHRASE } },
       sink: acceptingSink()
     })
 
-    // One seed from the export passphrase, one from the credential's secret.
+    // One seed and one standing client from the export passphrase, one of
+    // each from the credential's secret.
     expect(seeds).toHaveLength(2)
-    for (const seed of seeds) {
-      expect(seed.every(byte => byte === 0)).toBe(true)
-    }
-    expect(recovered.length).toBeGreaterThan(0)
-    for (const generation of recovered) {
-      expect(generation.secret.every(byte => byte === 0)).toBe(true)
-    }
+    expectAllZeroed(seeds)
+    expect(clientSecrets).toHaveLength(2)
+    expectAllZeroed(clientSecretBytes())
+    expect(credentialSecrets).toHaveLength(1)
+    expectAllZeroed(credentialSecrets)
+    expect(recovered).toHaveLength(1)
+    expectAllZeroed(recovered.map(generation => generation.secret))
   }, 120000)
 
   it('zeroes the export passphrase seed on a direct unpack', async () => {

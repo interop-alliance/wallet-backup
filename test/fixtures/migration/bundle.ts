@@ -259,15 +259,27 @@ export function recipientFor(keyAgreementKey: unknown): RecipientPublicKey {
 }
 
 /**
- * Serializes an encryption descriptor as the one-entry JSON Lines log whose
- * head declares it.
- * @param descriptor {CollectionEncryption}
+ * Serializes an encryption descriptor as the JSON Lines log whose head
+ * declares it. With `earlier` descriptors the log carries a history: those
+ * entries come first, oldest first, and the given descriptor is the last
+ * entry, so a reader that takes any entry but the head reads a stale one.
+ *
+ * @param descriptor {CollectionEncryption}   the head entry's descriptor
+ * @param [options] {object}
+ * @param [options.earlier] {CollectionEncryption[]}   the entries before the
+ *   head, oldest first; none by default
  * @returns {string}
  */
-export function logBody(descriptor: CollectionEncryption): string {
-  return `${JSON.stringify({
-    state: toEpochConfigurationState(descriptor)
-  })}\n`
+export function logBody(
+  descriptor: CollectionEncryption,
+  { earlier = [] }: { earlier?: CollectionEncryption[] } = {}
+): string {
+  return [...earlier, descriptor]
+    .map(
+      entry =>
+        `${JSON.stringify({ state: toEpochConfigurationState(entry) })}\n`
+    )
+    .join('')
 }
 
 /**
@@ -293,27 +305,34 @@ export function collectionLogFile({
 
 /**
  * Encrypts Resources into a collection's archive files, under the descriptor's
- * current epoch. Each file is named with the id the cipher derived, which is
- * the id the envelope is bound to.
+ * current epoch or the one `epochIndex` names. Each file is named with the id
+ * the cipher derived, which is the id the envelope is bound to.
  *
  * @param options {object}
  * @param options.collectionId {string}
  * @param options.encryption {CollectionEncryption}
  * @param options.resources {unknown[]}
+ * @param [options.epochIndex] {number}   seals under this epoch of the
+ *   descriptor (oldest first) instead of its current one
  * @returns {Promise<ArchiveFile[]>}
  */
 export async function encryptResources({
   collectionId,
   encryption,
-  resources
+  resources,
+  epochIndex
 }: {
   collectionId: string
   encryption: CollectionEncryption
   resources: unknown[]
+  epochIndex?: number
 }): Promise<ArchiveFile[]> {
   const cipher = await createEdvEncryptOnlyDocCipher({
     collectionId,
-    encryption
+    encryption:
+      epochIndex === undefined
+        ? encryption
+        : { ...encryption, currentEpoch: encryption.epochs![epochIndex]!.id }
   })
   const files: ArchiveFile[] = []
   for (const resource of resources) {
@@ -506,7 +525,12 @@ export async function sealBinaryResources({
       })
       continue
     }
-    await write.execute(context).catch(() => undefined)
+    // Only a torn write is meant to fail; any other failure is the fixture's.
+    await write.execute(context).catch((err: unknown) => {
+      if (tearChunksFrom === undefined) {
+        throw err
+      }
+    })
     const prefix = `/space/${FIXTURE_SPACE_ID}/${collectionId}/${write.id}`
     const chunks: BytesFile[] = []
     for (let index = 0; store.has(`${prefix}/chunks/${index}`); index += 1) {
@@ -565,7 +589,8 @@ export function chunkDir(resourceId: string): ArchiveEntry {
 
 /**
  * The `key-map` collection directory, holding the user key roster Resource.
- * @param body {string}   the roster log's JSON Lines
+ * @param body {string}   the roster log's JSON Lines, as {@link logBody}
+ *   serializes it (with `earlier` for a roster log with history)
  * @returns {ArchiveEntry}
  */
 export function keyMapDir(body: string): ArchiveEntry {

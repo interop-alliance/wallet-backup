@@ -21,7 +21,7 @@ import {
 import {
   PRIVATE_CREDENTIALS_COLLECTION,
   WALLET_ACTIVITY_COLLECTION,
-  APP_CONNECTIONS_COLLECTION
+  APP_KEYS_COLLECTION
 } from '@interop/wallet-core/space/collections'
 import {
   CONTACTS_COLLECTION,
@@ -56,6 +56,7 @@ import type {
   MigrationReport,
   MigrationSecret,
   MigrationSink,
+  MigrationSinkMethod,
   SinkOutcome
 } from '../../src/index.js'
 import { walkCollection } from '../../src/migrate/collectionWalk.js'
@@ -106,6 +107,16 @@ interface FixtureCollection {
   sealedEntries?: (encryption: CollectionEncryption) => Promise<ArchiveEntry[]>
   /** the generations the descriptor's blinded-index key is wrapped to */
   hmacFor?: Generation[]
+  /**
+   * seals `resources` under this epoch of the descriptor (an index into
+   * `openedBy`) instead of its current one
+   */
+  resourcesEpochIndex?: number
+  /**
+   * earlier descriptors the governing log carries before its head, oldest
+   * first, each given as the `openedBy` it is minted from
+   */
+  earlierLogs?: Generation[][][]
   /**
    * an index schema sealed into the metadata `custom` by `by`, bound to
    * `boundTo` (the collection's own id by default), under the first epoch
@@ -206,18 +217,22 @@ async function fixtureBundle({
  * @param options.recipients {RecipientPublicKey[]}
  * @param options.collections {FixtureCollection[]}
  * @param [options.rosterWithoutWrapFor] {ReadonlySet<string>}
+ * @param [options.earlierRosters] {CollectionEncryption[]}   roster
+ *   descriptors the roster log carries before its head, oldest first
  * @returns {Promise<ArchiveEntry[]>}
  */
 async function fixtureSpaceEntries({
   generations,
   recipients,
   collections,
-  rosterWithoutWrapFor
+  rosterWithoutWrapFor,
+  earlierRosters
 }: {
   generations: Generation[]
   recipients: RecipientPublicKey[]
   collections: FixtureCollection[]
   rosterWithoutWrapFor?: ReadonlySet<string>
+  earlierRosters?: CollectionEncryption[]
 }): Promise<ArchiveEntry[]> {
   const roster = await rosterDescriptor({
     generations,
@@ -231,7 +246,11 @@ async function fixtureSpaceEntries({
       name: `.space.${FIXTURE_SPACE_ID}.json`,
       document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
     }),
-    keyMapDir(logBody(roster))
+    keyMapDir(
+      logBody(roster, {
+        ...(earlierRosters !== undefined && { earlier: earlierRosters })
+      })
+    )
   ]
   for (const collection of collections) {
     let metadata = collection.metadata
@@ -261,19 +280,29 @@ async function fixtureSpaceEntries({
         }
       }
       const log = collection.log ?? 'wrapped'
+      const earlier: CollectionEncryption[] = []
+      for (const openedBy of collection.earlierLogs ?? []) {
+        earlier.push(await collectionDescriptor({ openedBy }))
+      }
       leadingFiles = [
         ...(log === 'omit'
           ? []
           : [
               collectionLogFile({
                 collectionId: collection.collectionId,
-                body: log === 'broken' ? 'not a log' : logBody(encryption)
+                body:
+                  log === 'broken'
+                    ? 'not a log'
+                    : logBody(encryption, { earlier })
               })
             ]),
         ...(await encryptResources({
           collectionId: collection.collectionId,
           encryption,
-          resources: collection.resources
+          resources: collection.resources,
+          ...(collection.resourcesEpochIndex !== undefined && {
+            epochIndex: collection.resourcesEpochIndex
+          })
         })),
         ...((await collection.sealedEntries?.(encryption)) ?? [])
       ]
@@ -297,11 +326,23 @@ async function fixtureSpaceEntries({
 }
 
 /**
- * A sink that records every call and answers with whatever the caller's
- * `answer` function returns (or throws).
+ * One call a recording sink saw: which import function took it, and what it
+ * was handed.
+ */
+type RecordedCall = {
+  method: MigrationSinkMethod | 'importResource'
+  collectionId: string
+  resourceId: string
+  json: unknown
+}
+
+/**
+ * A sink that records every call, with the name of the import function that
+ * took it, and answers with whatever the caller's `answer` function returns
+ * (or throws).
  *
  * @param [answer] {function}   `({ collectionId, index }) => SinkOutcome`
- * @returns {MigrationSink & { calls: Array<{ collectionId: string, resourceId: string, json: unknown }> }}
+ * @returns {MigrationSink & { calls: RecordedCall[], record: function }}
  */
 function recordingSink(
   answer?: (options: {
@@ -310,44 +351,43 @@ function recordingSink(
     json: unknown
   }) => SinkOutcome
 ): MigrationSink & {
-  calls: Array<{ collectionId: string; resourceId: string; json: unknown }>
+  calls: RecordedCall[]
+  record: (call: RecordedCall) => Promise<SinkOutcome>
 } {
-  const calls: Array<{
-    collectionId: string
-    resourceId: string
-    json: unknown
-  }> = []
+  const calls: RecordedCall[] = []
   const seen = new Map<string, number>()
 
   /**
-   * The one import function every sink method delegates to.
-   * @param options {object}
-   * @param options.collectionId {string}
-   * @param options.resourceId {string}
-   * @param options.json {unknown}
+   * The one recorder every import function delegates to.
+   * @param call {RecordedCall}
    * @returns {Promise<SinkOutcome>}
    */
-  async function record({
-    collectionId,
-    resourceId,
-    json
-  }: {
-    collectionId: string
-    resourceId: string
-    json: unknown
-  }): Promise<SinkOutcome> {
-    calls.push({ collectionId, resourceId, json })
+  async function record(call: RecordedCall): Promise<SinkOutcome> {
+    calls.push(call)
+    const { collectionId, json } = call
     const index = seen.get(collectionId) ?? 0
     seen.set(collectionId, index + 1)
     return answer ? answer({ collectionId, index, json }) : 'accepted'
   }
 
+  /**
+   * A sink method that records its own name with each call.
+   * @param method {MigrationSinkMethod}
+   * @returns {function}
+   */
+  function recorder(
+    method: MigrationSinkMethod
+  ): (options: Omit<RecordedCall, 'method'>) => Promise<SinkOutcome> {
+    return options => record({ method, ...options })
+  }
+
   return {
     calls,
-    importCredential: record,
-    importContact: record,
-    importContactRevision: record,
-    importActivity: record
+    record,
+    importCredential: recorder('importCredential'),
+    importContact: recorder('importContact'),
+    importContactRevision: recorder('importContactRevision'),
+    importActivity: recorder('importActivity')
   }
 }
 
@@ -400,7 +440,12 @@ function appRecordingSink({
         appResources.push(options)
         const { collectionId, resourceId } = options
         const json = 'json' in options ? options.json : options.bytes
-        return sink.importContact({ collectionId, resourceId, json })
+        return sink.record({
+          method: 'importResource',
+          collectionId,
+          resourceId,
+          json
+        })
       }
     }
   }
@@ -504,11 +549,13 @@ describe('migrateBundle', () => {
       sink
     })
 
-    expect(sink.calls.map(call => call.collectionId)).toEqual([
-      CONTACTS_COLLECTION,
-      CONTACTS_HISTORY_COLLECTION,
-      PRIVATE_CREDENTIALS_COLLECTION,
-      WALLET_ACTIVITY_COLLECTION
+    expect(
+      sink.calls.map(({ collectionId, method }) => [collectionId, method])
+    ).toEqual([
+      [CONTACTS_COLLECTION, 'importContact'],
+      [CONTACTS_HISTORY_COLLECTION, 'importContactRevision'],
+      [PRIVATE_CREDENTIALS_COLLECTION, 'importCredential'],
+      [WALLET_ACTIVITY_COLLECTION, 'importActivity']
     ])
     expect(sink.calls[0]!.json).toEqual({ contactId: 'c-1' })
     expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual({
@@ -563,7 +610,110 @@ describe('migrateBundle', () => {
     expect(sink.calls).toHaveLength(0)
   })
 
-  it('opens pre-rotation generations with a retired secret, and refuses one established after the export', async () => {
+  it('refuses a wrong passphrase as a recipient of nothing, before any sink call', async () => {
+    const [generation] = await mintGenerations(1)
+    const { recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipient],
+      collections: standardCollections(generation!)
+    })
+    const sink = recordingSink()
+    await expect(
+      migrateBundle({
+        bundle,
+        secret: { passphrase: 'not the passphrase of this account' },
+        sink
+      })
+    ).rejects.toMatchObject({ name: 'BundleRecipientMissingError' })
+    expect(sink.calls).toHaveLength(0)
+  })
+
+  it('refuses a sealed backup credential handed in without its export passphrase', async () => {
+    const [generation] = await mintGenerations(1)
+    const secret = crypto.getRandomValues(new Uint8Array(32))
+    const client = await standingClientFromUnlockSeed({
+      unlockSeed: await deriveUnlockSeed({ secret, kdf: BACKUP_CREDENTIAL_KDF })
+    })
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipientFor(client.agents.keyAgreementKey)],
+      collections: standardCollections(generation!),
+      backupCredential: await packBackupCredential({
+        secret,
+        exportPassphrase: 'correct horse battery staple'
+      })
+    })
+    const sink = recordingSink()
+    await expect(
+      migrateBundle({ bundle, secret: { packedCredential: {} }, sink })
+    ).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringMatching(/sealed and no export passphrase/)
+    })
+    expect(sink.calls).toHaveLength(0)
+  })
+
+  it('reads the user key roster from the head of a roster log with history', async () => {
+    const [older, newer] = await mintGenerations(2)
+    const { code, recipient } = await recoverySecret()
+    // The earlier roster entry is wrapped to another secret alone, so a
+    // reader that took it instead of the head would find no recipient.
+    const staleRoster = await rosterDescriptor({
+      generations: [older!],
+      recipients: [(await recoverySecret()).recipient]
+    })
+    const bundle = await fixtureBundle({
+      generations: [older!, newer!],
+      recipients: [recipient],
+      earlierRosters: [staleRoster],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-1' }],
+          openedBy: [[newer!]]
+        }
+      ]
+    })
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink: recordingSink()
+    })
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
+  })
+
+  it('opens a collection with the head descriptor of a governing log with history', async () => {
+    const [generation] = await mintGenerations(1)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          openedBy: [[generation!]],
+          // An earlier descriptor with an epoch of its own: the same
+          // generation builds a cipher from it, but that cipher knows none
+          // of the epochs the Resources are sealed under.
+          earlierLogs: [[[generation!]]]
+        }
+      ]
+    })
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink: recordingSink()
+    })
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 2 })
+    )
+  })
+
+  it('opens pre-rotation generations with a retired secret', async () => {
     const [older, newer] = await mintGenerations(2)
     const retired = await recoverySecret()
     const current = await recoverySecret()
@@ -612,17 +762,6 @@ describe('migrateBundle', () => {
       sink: retiredSink
     })
     expect(report.collections[CONTACTS_COLLECTION]!.accepted).toBe(1)
-
-    // A secret enrolled after the export is in no archived epoch at all.
-    const laterSink = recordingSink()
-    await expect(
-      migrateBundle({
-        bundle,
-        secret: { recoveryCode: (await recoverySecret()).code },
-        sink: laterSink
-      })
-    ).rejects.toMatchObject({ name: 'BundleRecipientMissingError' })
-    expect(laterSink.calls).toHaveLength(0)
   })
 
   it('opens every Resource of a torn cascade', async () => {
@@ -651,9 +790,46 @@ describe('migrateBundle', () => {
       sink
     })
     expect(sink.calls).toHaveLength(2)
-    expect(report.collections[CONTACTS_COLLECTION]!.accepted).toBe(1)
-    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]!.accepted).toBe(1)
-    expect(report.collections[CONTACTS_COLLECTION]!.unopenable).toBe(0)
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
+    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
+    // A standard collection the archive does not carry is never entered.
+    expect(Object.keys(report.collections)).not.toContain(
+      CONTACTS_HISTORY_COLLECTION
+    )
+  })
+
+  it('falls back to an older generation for a Resource the newest cannot unwrap', async () => {
+    const [older, newer] = await mintGenerations(2)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [older!, newer!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-old' }],
+          // The newest generation opens the current epoch, so its cipher
+          // builds, but the Resource sits under the first epoch, which only
+          // the older generation holds.
+          openedBy: [[older!], [older!, newer!]],
+          resourcesEpochIndex: 0
+        }
+      ]
+    })
+    const sink = recordingSink()
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(sink.calls.map(call => call.json)).toEqual([{ contactId: 'c-old' }])
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
   })
 
   it('reports Resources no held generation opens, by name', async () => {
@@ -715,7 +891,7 @@ describe('migrateBundle', () => {
     })
   })
 
-  it('yields an all-skipped report on a re-run', async () => {
+  it('counts a skipped outcome per Resource', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -728,8 +904,14 @@ describe('migrateBundle', () => {
       secret: { recoveryCode: code },
       sink: recordingSink(() => 'skipped')
     })
+    expect(Object.keys(report.collections)).toEqual([
+      CONTACTS_COLLECTION,
+      CONTACTS_HISTORY_COLLECTION,
+      PRIVATE_CREDENTIALS_COLLECTION,
+      WALLET_ACTIVITY_COLLECTION
+    ])
     for (const collection of Object.values(report.collections)) {
-      expect(collection).toMatchObject({ accepted: 0, skipped: 1 })
+      expect(collection).toEqual(tally({ skipped: 1 }))
     }
   })
 
@@ -810,6 +992,86 @@ describe('migrateBundle', () => {
     expect(report.stoppedAt).toBeUndefined()
   })
 
+  it('resets the failure run on a success, so failures that never run ten in a row end nothing', async () => {
+    const [generation] = await mintGenerations(1)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: Array.from({ length: 19 }, (_unused, index) => ({
+            contactId: `c-${index}`
+          })),
+          openedBy: [[generation!]]
+        }
+      ]
+    })
+    // Nine failures, one success, nine failures: never ten in a row.
+    const sink = recordingSink(({ index }) => {
+      if (index === 9) {
+        return 'accepted'
+      }
+      const err = new Error('the store is flaky')
+      err.name = 'PayloadTooLargeError'
+      throw err
+    })
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(sink.calls).toHaveLength(19)
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 1, failed: 18 })
+    )
+  })
+
+  it("counts a sink's returned failed and conflicting outcomes, and ends a collection after ten returned failures", async () => {
+    const [generation] = await mintGenerations(1)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: Array.from({ length: 12 }, (_unused, index) => ({
+            contactId: `c-${index}`
+          })),
+          openedBy: [[generation!]]
+        },
+        {
+          collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+          resources: [{ cid: 'z-1' }, { cid: 'z-2' }, { cid: 'z-3' }],
+          openedBy: [[generation!]]
+        }
+      ]
+    })
+    const sink = recordingSink(({ collectionId, index }) => {
+      if (collectionId === CONTACTS_COLLECTION) {
+        return 'failed'
+      }
+      return index === 0 ? 'failed' : 'conflicting'
+    })
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(
+      sink.calls.filter(call => call.collectionId === CONTACTS_COLLECTION)
+    ).toHaveLength(10)
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ failed: 10, stoppedBy: 'failed' })
+    )
+    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual(
+      tally({ failed: 1, conflicting: 2 })
+    )
+    expect(report.stoppedAt).toBeUndefined()
+  })
+
   it('stops the whole walk on a quota refusal', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
@@ -839,7 +1101,7 @@ describe('migrateBundle', () => {
     expect(report.collections[WALLET_ACTIVITY_COLLECTION]).toBeUndefined()
   })
 
-  it('counts app-connections Resources as not migrated and calls no sink method', async () => {
+  it('counts app-keys Resources as not migrated and calls no sink method', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -852,7 +1114,7 @@ describe('migrateBundle', () => {
           openedBy: [[generation!]]
         },
         {
-          collectionId: APP_CONNECTIONS_COLLECTION,
+          collectionId: APP_KEYS_COLLECTION,
           resources: [{ app: 'one' }, { app: 'two' }],
           openedBy: [[generation!]]
         }
@@ -864,11 +1126,11 @@ describe('migrateBundle', () => {
       secret: { recoveryCode: code },
       sink
     })
-    expect(report.notMigrated[APP_CONNECTIONS_COLLECTION]).toBe(2)
-    expect(report.collections[APP_CONNECTIONS_COLLECTION]).toBeUndefined()
-    expect(
-      sink.calls.every(call => call.collectionId === CONTACTS_COLLECTION)
-    ).toBe(true)
+    expect(report.notMigrated[APP_KEYS_COLLECTION]).toBe(2)
+    expect(report.collections[APP_KEYS_COLLECTION]).toBeUndefined()
+    expect(sink.calls.map(call => call.collectionId)).toEqual([
+      CONTACTS_COLLECTION
+    ])
   })
 
   it('counts a collection whose id is a prototype member name', async () => {
@@ -960,27 +1222,51 @@ describe('migrateBundle', () => {
     expect(sink.calls).toHaveLength(1)
   })
 
-  it('reports progress per Resource', async () => {
+  it('reports progress per Resource, unopenable ones included', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
       generations: [generation!],
       recipients: [recipient],
-      collections: standardCollections(generation!)
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          openedBy: [[generation!]],
+          // A chunked Resource in a standard collection is counted before
+          // the collection's Resources are read.
+          chunked: ['big.blob']
+        },
+        {
+          collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+          resources: [{ cid: 'z-1' }],
+          openedBy: [[generation!]]
+        }
+      ]
     })
     const progress = vi.fn()
     await migrateBundle({
       bundle,
       secret: { recoveryCode: code } satisfies MigrationSecret,
-      sink: recordingSink(),
+      sink: recordingSink(({ collectionId, index }) =>
+        collectionId === CONTACTS_COLLECTION && index === 1
+          ? 'skipped'
+          : 'accepted'
+      ),
       onProgress: progress
     })
-    expect(progress).toHaveBeenCalledTimes(4)
-    expect(progress).toHaveBeenCalledWith({
-      collectionId: CONTACTS_COLLECTION,
-      index: 0,
-      outcome: 'accepted'
-    })
+    expect(progress.mock.calls).toEqual([
+      [{ collectionId: CONTACTS_COLLECTION, index: 0, outcome: 'unopenable' }],
+      [{ collectionId: CONTACTS_COLLECTION, index: 1, outcome: 'accepted' }],
+      [{ collectionId: CONTACTS_COLLECTION, index: 2, outcome: 'skipped' }],
+      [
+        {
+          collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+          index: 0,
+          outcome: 'accepted'
+        }
+      ]
+    ])
   })
 
   it('refuses the whole bundle when the user key roster log is unreadable', async () => {
@@ -1000,10 +1286,50 @@ describe('migrateBundle', () => {
         secret: { recoveryCode: code },
         sink: recordingSink()
       })
-    ).rejects.toMatchObject({ name: 'BundleInvalidError' })
+    ).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringMatching(/roster log .* cannot be read/),
+      cause: expect.objectContaining({ name: 'CollectionLogUnreadableError' })
+    })
   })
 
-  it('refuses before deriving the secret when no account Space archive is named', async () => {
+  it('refuses the whole bundle when it carries no user key roster resource', async () => {
+    const [generation] = await mintGenerations(1)
+    const { code } = await recoverySecret()
+    const encryption = await collectionDescriptor({ openedBy: [[generation!]] })
+    const bundle = await buildBundle({
+      entries: [
+        jsonFile({
+          name: `.space.${FIXTURE_SPACE_ID}.json`,
+          document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
+        }),
+        collectionDir({
+          collectionId: CONTACTS_COLLECTION,
+          files: [
+            collectionLogFile({
+              collectionId: CONTACTS_COLLECTION,
+              body: logBody(encryption)
+            }),
+            ...(await encryptResources({
+              collectionId: CONTACTS_COLLECTION,
+              encryption,
+              resources: [{ contactId: 'c-1' }]
+            }))
+          ]
+        })
+      ]
+    })
+    const sink = recordingSink()
+    await expect(
+      migrateBundle({ bundle, secret: { recoveryCode: code }, sink })
+    ).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringMatching(/no user key roster resource/)
+    })
+    expect(sink.calls).toHaveLength(0)
+  })
+
+  it('refuses a bundle that names no account Space archive, whatever the secret', async () => {
     const archive = await collectBytes(
       (await packSpaceArchive({
         spaceId: FIXTURE_SPACE_ID,
@@ -1100,11 +1426,16 @@ describe('migrateBundle', () => {
       secret: { recoveryCode: code },
       sink
     })
-    expect(report.collections[CONTACTS_COLLECTION]).toMatchObject({
-      accepted: 0,
-      stoppedBy: 'EncryptionError'
-    })
-    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]!.accepted).toBe(1)
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({
+        unopenable: 1,
+        unopenableCauses: { EncryptionError: 1 },
+        stoppedBy: 'EncryptionError'
+      })
+    )
+    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
   })
 
   it('migrates past a malformed percent-encoded file name in a collection directory', async () => {
@@ -1639,18 +1970,18 @@ describe('migrateBundle', () => {
       expect(report.collections['notes']).toBeUndefined()
     })
 
-    it('leaves app-connections unmigrated with an app-collections sink', async () => {
+    it('leaves app-keys unmigrated with an app-collections sink', async () => {
       const { sink, report } = await runApp({
         collections: ([generation]) => [
           {
-            collectionId: APP_CONNECTIONS_COLLECTION,
+            collectionId: APP_KEYS_COLLECTION,
             resources: [{ app: 'one' }],
             openedBy: [[generation!]]
           }
         ]
       })
       expect(sink.events).toEqual([])
-      expect(report.notMigrated[APP_CONNECTIONS_COLLECTION]).toBe(1)
+      expect(report.notMigrated[APP_KEYS_COLLECTION]).toBe(1)
     })
 
     it('stops just the app collection whose ensureCollection throws', async () => {
@@ -2011,80 +2342,161 @@ describe('migrateBundle', () => {
         expect(report.collections['photos']).toEqual(tally({ accepted: 4 }))
       })
 
-      it('counts a missing, foreign, other-epoch or swapped chunk by its error name and migrates the rest', async () => {
+      /**
+       * A chunk file carrying another chunk's bytes under its own name: a
+       * moved chunk keeps its file name, so only its bytes tell where it came
+       * from.
+       * @param to {BytesFile}   the chunk file whose name is kept
+       * @param from {BytesFile}   the chunk file whose bytes are taken
+       * @returns {BytesFile}
+       */
+      function moved(to: BytesFile, from: BytesFile): BytesFile {
+        return { name: to.name, bytes: from.bytes }
+      }
+
+      /**
+       * Migrates `photos` holding one healthy chunked Resource beside the
+       * damaged one the caller builds, checks the healthy one arrived, and
+       * answers the collection's report. One damaged Resource per run, so
+       * each cause is counted on its own.
+       *
+       * @param damaged {function}   builds the damaged Resource's entries
+       *   with the collection's `seal`; the collection has two epochs
+       * @returns {Promise<MigrationCollectionReport>}
+       */
+      async function withHealthyBeside(
+        damaged: (
+          seal: Parameters<
+            Parameters<typeof runPhotos>[0]['entries']
+          >[0]['seal']
+        ) => Promise<ArchiveEntry[]>
+      ): Promise<MigrationCollectionReport> {
         let healthyId = ''
         const { sink, run } = await runPhotos({
           epochs: 2,
           entries: async ({ seal }) => {
-            const [healthy, missing, foreign, donor, swapped] = await seal([
-              { data: photo, contentType: 'image/png' },
-              { data: photo, contentType: 'image/png' },
-              { data: photo, contentType: 'image/png' },
-              { data: otherPhoto, contentType: 'image/png' },
+            const [healthy] = await seal([
               { data: photo, contentType: 'image/png' }
             ])
-            const [current] = await seal([
-              { data: photo, contentType: 'image/png' }
-            ])
-            // The same Resource id written again under the older epoch.
-            const [older] = await seal(
-              [{ data: photo, contentType: 'image/png', id: current!.id }],
-              { epochIndex: 0 }
-            )
             healthyId = healthy!.id
-            const directory = (
-              id: string,
-              files: BytesFile[]
-            ): ArchiveEntry[] => [chunkDirWith({ resourceId: id, files })]
-            // A chunk keeps its own file name when moved: only its bytes
-            // tell where it came from.
-            const moved = (to: BytesFile, from: BytesFile): BytesFile => ({
-              name: to.name,
-              bytes: from.bytes
-            })
             return [
               healthy!.representation,
-              ...directory(healthy!.id, healthy!.chunks),
-              missing!.representation,
-              ...directory(missing!.id, [
-                missing!.chunks[0]!,
-                missing!.chunks[2]!
-              ]),
-              foreign!.representation,
-              ...directory(foreign!.id, [
-                foreign!.chunks[0]!,
-                moved(foreign!.chunks[1]!, donor!.chunks[1]!),
-                foreign!.chunks[2]!
-              ]),
-              current!.representation,
-              ...directory(current!.id, [
-                current!.chunks[0]!,
-                moved(current!.chunks[1]!, older!.chunks[1]!),
-                current!.chunks[2]!
-              ]),
-              swapped!.representation,
-              ...directory(swapped!.id, [
-                moved(swapped!.chunks[0]!, swapped!.chunks[1]!),
-                moved(swapped!.chunks[1]!, swapped!.chunks[0]!),
-                swapped!.chunks[2]!
-              ])
+              chunkDirWith({ resourceId: healthy!.id, files: healthy!.chunks }),
+              ...(await damaged(seal))
             ]
           }
         })
         const report = await run
         expect(byId(sink).get(healthyId)).toMatchObject({ bytes: photo })
-        expect(report.collections['photos']).toEqual(
+        return report.collections['photos']!
+      }
+
+      it('counts a chunked Resource with a missing chunk as NotFoundError', async () => {
+        const report = await withHealthyBeside(async seal => {
+          const [missing] = await seal([
+            { data: photo, contentType: 'image/png' }
+          ])
+          return [
+            missing!.representation,
+            chunkDirWith({
+              resourceId: missing!.id,
+              files: [missing!.chunks[0]!, missing!.chunks[2]!]
+            })
+          ]
+        })
+        expect(report).toEqual(
           tally({
             accepted: 2,
-            unopenable: 4,
-            unopenableCauses: {
-              NotFoundError: 1,
-              EncryptionError: 2,
-              // The swapped chunks fail their index-bound AAD. Node's AEAD
-              // throws a plain `Error` there; minimal-cipher names the failure
-              // `DataError` only where the platform decrypt returns null.
-              Error: 1
-            }
+            unopenable: 1,
+            unopenableCauses: { NotFoundError: 1 }
+          })
+        )
+      })
+
+      it("counts a chunked Resource holding another Resource's chunk as EncryptionError", async () => {
+        const report = await withHealthyBeside(async seal => {
+          const [foreign, donor] = await seal([
+            { data: photo, contentType: 'image/png' },
+            { data: otherPhoto, contentType: 'image/png' }
+          ])
+          return [
+            foreign!.representation,
+            chunkDirWith({
+              resourceId: foreign!.id,
+              files: [
+                foreign!.chunks[0]!,
+                moved(foreign!.chunks[1]!, donor!.chunks[1]!),
+                foreign!.chunks[2]!
+              ]
+            })
+          ]
+        })
+        expect(report).toEqual(
+          tally({
+            accepted: 2,
+            unopenable: 1,
+            unopenableCauses: { EncryptionError: 1 }
+          })
+        )
+      })
+
+      it('counts a chunked Resource holding a chunk sealed under another epoch as EncryptionError', async () => {
+        const report = await withHealthyBeside(async seal => {
+          const [current] = await seal([
+            { data: photo, contentType: 'image/png' }
+          ])
+          // The same Resource id written again under the older epoch.
+          const [older] = await seal(
+            [{ data: photo, contentType: 'image/png', id: current!.id }],
+            { epochIndex: 0 }
+          )
+          return [
+            current!.representation,
+            chunkDirWith({
+              resourceId: current!.id,
+              files: [
+                current!.chunks[0]!,
+                moved(current!.chunks[1]!, older!.chunks[1]!),
+                current!.chunks[2]!
+              ]
+            })
+          ]
+        })
+        expect(report).toEqual(
+          tally({
+            accepted: 2,
+            unopenable: 1,
+            unopenableCauses: { EncryptionError: 1 }
+          })
+        )
+      })
+
+      it('counts a chunked Resource with two chunks swapped by the AEAD failure name', async () => {
+        const report = await withHealthyBeside(async seal => {
+          const [swapped] = await seal([
+            { data: photo, contentType: 'image/png' }
+          ])
+          return [
+            swapped!.representation,
+            chunkDirWith({
+              resourceId: swapped!.id,
+              files: [
+                moved(swapped!.chunks[0]!, swapped!.chunks[1]!),
+                moved(swapped!.chunks[1]!, swapped!.chunks[0]!),
+                swapped!.chunks[2]!
+              ]
+            })
+          ]
+        })
+        // The swapped chunks fail their index-bound AAD. Node's AEAD throws a
+        // plain `Error` there; minimal-cipher names the failure `DataError`
+        // only where the platform decrypt returns null. The report carries
+        // the name alone, so the message is not visible here.
+        expect(report).toEqual(
+          tally({
+            accepted: 2,
+            unopenable: 1,
+            unopenableCauses: { Error: 1 }
           })
         )
       })

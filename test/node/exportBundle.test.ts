@@ -184,7 +184,12 @@ describe('exportBundle', () => {
     const walked: string[] = []
     for await (const space of bundle.spaces) {
       walked.push(space.spaceId)
-      expect((await space.bytes()).byteLength).toBeGreaterThan(0)
+      const archive = await space.bytes()
+      expect(
+        Buffer.from(archive).equals(
+          Buffer.from(await packFixtureArchive(space.spaceId))
+        )
+      ).toBe(true)
     }
     expect(walked).toEqual([ACCOUNT_SPACE_ID, UNLOCK_SPACE_ID])
 
@@ -306,7 +311,9 @@ describe('exportBundle', () => {
     const first = await reader.read()
     chunks.push(first.value!)
     await settleTasks()
-    expect(started.length).toBeLessThan(spaceIds.length)
+    // The first chunk does not drain the first Space entry, so the window has
+    // not moved.
+    expect(started).toEqual(spaceIds.slice(0, 3))
     for (;;) {
       const { done, value } = await reader.read()
       if (done) {
@@ -435,6 +442,7 @@ describe('exportBundle', () => {
 
   it('aborts before a Space is exported', async () => {
     const controller = new AbortController()
+    let exported = false
     const err = await raised(() =>
       exportBundle({
         meta,
@@ -444,10 +452,15 @@ describe('exportBundle', () => {
           controller.abort(new Error('the user cancelled'))
           return accountSpaces
         },
-        exportSpace: async ({ spaceId }) => packFixtureArchive(spaceId)
+        async exportSpace({ spaceId }) {
+          exported = true
+          return packFixtureArchive(spaceId)
+        }
       })
     )
+    await settleTasks()
 
     expect(err.message).toBe('the user cancelled')
+    expect(exported).toBe(false)
   })
 })

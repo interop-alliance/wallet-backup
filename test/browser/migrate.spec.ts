@@ -12,6 +12,10 @@ test('migrates a chunked Resource in the browser, through the Blob path', async 
     return migration.migrateChunkedBundle()
   })
   expect(result.chunkCount).toBeGreaterThan(1)
+  expect(result.calls).toEqual([
+    { collectionId: 'photos', method: 'ensureCollection' },
+    { collectionId: 'photos', method: 'importResource' }
+  ])
   expect(result.received).toEqual({
     contentType: 'image/png',
     bytes: result.written

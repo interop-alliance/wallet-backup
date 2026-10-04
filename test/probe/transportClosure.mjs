@@ -19,6 +19,11 @@
  * `@interop/capability-agent` and the HTTP signing packages behind them. That
  * is wallet-core's own recorded allowance for its leaves, so the HTTP packages
  * are not in the forbidden set here; the was-client request path is.
+ *
+ * The forbidden set matches on upstream `dist/` paths, so a change in that
+ * layout would leave it matching nothing and the probe passing vacuously. A
+ * positive control guards that: the offline leaves the package is known to
+ * load must each appear among the resolved modules, or the probe fails.
  */
 import { registerHooks } from 'node:module'
 
@@ -42,6 +47,14 @@ const FORBIDDEN_MODULES = [
   '/wallet-core/dist/clientAnnex/'
 ]
 
+const EXPECTED_MODULES = [
+  '/wallet-core/dist/keyring/kdf.js',
+  '/wallet-core/dist/unlock/standingClient.js',
+  '/wallet-core/dist/keys/userKeyGenerations.js',
+  '/wallet-core/dist/recovery/recoveryCode.js',
+  '/was-client/dist/edv/docCipher.js'
+]
+
 const resolved = new Set()
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -52,6 +65,20 @@ registerHooks({
 })
 
 await import(new URL('../../dist/index.js', import.meta.url))
+
+const missing = EXPECTED_MODULES.filter(
+  fragment => ![...resolved].some(url => url.includes(fragment))
+)
+if (missing.length > 0) {
+  console.error(
+    'The package entry no longer resolves the expected offline leaves; ' +
+      'the upstream dist/ layout may have changed:'
+  )
+  for (const fragment of missing) {
+    console.error(`  ${fragment}`)
+  }
+  process.exit(1)
+}
 
 const failures = [...resolved].filter(url =>
   FORBIDDEN_MODULES.some(fragment => url.includes(fragment))

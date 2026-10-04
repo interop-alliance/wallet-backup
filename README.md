@@ -126,7 +126,7 @@ const report = await migrateBundle({
 
 report.collections['private-credentials']
 // { accepted: 12, skipped: 3, conflicting: 0, failed: 0, unopenable: 0 }
-report.notMigrated // { 'app-connections': 2 }
+report.notMigrated // { 'app-keys': 2 }
 report.manifest // the bundle manifest minus its `contents`
 ```
 
@@ -166,8 +166,8 @@ A chunked Resource whose sealed type is `application/json` still arrives as
 `application/json` or an `application/...+json` type, and as raw `bytes`
 otherwise. Both keep their archived `resourceId`. A chunked Resource in a
 plaintext app collection or a standard collection is not opened. It counts as
-`unopenable` under `ChunkedResourceUnsupportedError`. `app-connections` is part
-of the wallet layout and is not migrated yet.
+`unopenable` under `ChunkedResourceUnsupportedError`. `app-keys` is part of the
+wallet layout and is not migrated yet.
 
 The secret is one of `{ passphrase }`, `{ recoveryCode }`, or
 `{ packedCredential: { exportPassphrase } }`. The last reads the bundle's own

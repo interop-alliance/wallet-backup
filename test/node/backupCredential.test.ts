@@ -3,6 +3,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import { base64urlnopad } from '@scure/base'
+import { KEYRING_KDF } from '@interop/wallet-core/keyring/kdf'
 import {
   packBackupCredential,
   unpackBackupCredential
@@ -24,6 +25,17 @@ async function errorName(run: () => Promise<unknown>): Promise<string> {
     return (err as Error).name
   }
   throw new Error('The call did not throw.')
+}
+
+/**
+ * Flips one bit of a base64url-nopad string's first decoded byte.
+ * @param encoded {string}
+ * @returns {string}
+ */
+function flipFirstByte(encoded: string): string {
+  const bytes = base64urlnopad.decode(encoded)
+  bytes[0] = (bytes[0] ?? 0) ^ 0x01
+  return base64urlnopad.encode(bytes)
 }
 
 /**
@@ -62,7 +74,6 @@ describe('packBackupCredential and unpackBackupCredential', () => {
       document: JSON.parse(JSON.stringify(packed))
     })
     expect(unpacked).toEqual(secret)
-    expect(unpacked).toHaveLength(32)
   })
 
   it('round-trips 32 bytes through a sealed document', async () => {
@@ -111,7 +122,7 @@ describe('packBackupCredential and unpackBackupCredential', () => {
     expect(first.kdf.salt).not.toBe(second.kdf.salt)
     // 16 random bytes, base64url without padding.
     expect(first.kdf.salt).toMatch(/^[A-Za-z0-9_-]{22}$/)
-    expect(first.kdf.salt).not.toBe('freewallet/keyring/unlock/argon2id/v1')
+    expect(first.kdf.salt).not.toBe(KEYRING_KDF.salt)
   })
 
   it('will not open under a substituted salt', async () => {
@@ -168,7 +179,42 @@ describe('packBackupCredential and unpackBackupCredential', () => {
     }
     await expect(
       packBackupCredential({ secret: new Uint8Array(16) })
-    ).rejects.toThrow()
+    ).rejects.toThrow(/is 32 bytes; got 16\./)
+  })
+
+  it('refuses a sealed document whose wrapped envelope was tampered with', async () => {
+    const { jwe } = sealedPacked.wrapped as {
+      jwe: { ciphertext: string; tag: string }
+    }
+    const tampered = [
+      { ...jwe, ciphertext: flipFirstByte(jwe.ciphertext) },
+      { ...jwe, tag: flipFirstByte(jwe.tag) }
+    ]
+    // was-client's `IntegrityError`: the envelope opens to the right key but
+    // its authentication tag no longer matches.
+    for (const edited of tampered) {
+      const document = {
+        ...sealedPacked,
+        wrapped: { ...(sealedPacked.wrapped as object), jwe: edited }
+      }
+      expect(
+        await errorName(() =>
+          unpackBackupCredential({ document, exportPassphrase })
+        )
+      ).toBe('IntegrityError')
+    }
+  })
+
+  it('refuses a sealed document missing its encryption member', async () => {
+    const { encryption: _encryption, ...document } = sealedPacked
+    await expect(
+      unpackBackupCredential({ document, exportPassphrase })
+    ).rejects.toMatchObject({
+      name: 'BundleInvalidError',
+      message: expect.stringContaining(
+        'missing its kdf, encryption, or wrapped member'
+      )
+    })
   })
 
   it('refuses a secret that is not base64url without padding', async () => {

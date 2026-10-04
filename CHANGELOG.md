@@ -1,5 +1,12 @@
 # @interop/wallet-backup Changelog
 
+## 0.6.0 - TBD
+
+### Changed
+
+- The app-key collection is now `app-keys` (renamed from `app-connections` in
+  wallet-core). The migration walk counts it under that id.
+
 ## 0.5.1 - 2026-09-29
 
 ### Changed

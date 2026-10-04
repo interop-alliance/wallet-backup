@@ -1,10 +1,13 @@
 import { test, expect } from '@playwright/test'
+import { BUNDLE_ROLE } from '../../src/bundle/manifest.js'
+
+const SPACE_DOCUMENT = '{"id":"zBrowserSpace"}'
 
 test('packs and reads an archive and a bundle in the browser', async ({
   page
 }) => {
   await page.goto('/test/index.html')
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async spaceDocument => {
     // This callback runs in the browser; the '/...' specifiers are URLs
     // served by the vite dev server, not module paths tsc can resolve from
     // disk. The bundle codec is imported directly, since only it is
@@ -22,7 +25,7 @@ test('packs and reads an archive and a bundle in the browser', async ({
       entries: [
         {
           name: '.space.zBrowserSpace.json',
-          bytes: new TextEncoder().encode('{"id":"zBrowserSpace"}')
+          bytes: new TextEncoder().encode(spaceDocument)
         }
       ]
     })
@@ -50,14 +53,23 @@ test('packs and reads an archive and a bundle in the browser', async ({
     const opened = await bundle.readBundle(bundleBytes)
     const accountArchive = await bundle.accountSpaceArchive(opened)
     const space = await archive.readSpaceArchive(accountArchive)
-    const paths: string[] = []
+    const files: Record<string, string> = {}
     for await (const entry of space.entries) {
-      paths.push(entry.name)
+      files[entry.name] = new TextDecoder().decode(await entry.bytes())
     }
-    return { spaceId: space.spaceId, paths }
-  })
+    return {
+      spaceId: space.spaceId,
+      files,
+      ubcVersion: opened.manifest['ubc-version'] as string,
+      roles: Object.fromEntries(opened.roles) as Record<string, string>
+    }
+  }, SPACE_DOCUMENT)
   expect(result.spaceId).toBe('zBrowserSpace')
-  expect(result.paths).toContain(
-    'space/zBrowserSpace/.space.zBrowserSpace.json'
+  expect(result.files['space/zBrowserSpace/.space.zBrowserSpace.json']).toBe(
+    SPACE_DOCUMENT
   )
+  expect(result.ubcVersion).toBe('0.1')
+  expect(result.roles).toEqual({
+    'spaces/zBrowserSpace.tar': BUNDLE_ROLE.accountSpaceArchive
+  })
 })
