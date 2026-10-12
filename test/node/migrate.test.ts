@@ -2488,15 +2488,15 @@ describe('migrateBundle', () => {
             })
           ]
         })
-        // The swapped chunks fail their index-bound AAD. Node's AEAD throws a
-        // plain `Error` there; minimal-cipher names the failure `DataError`
-        // only where the platform decrypt returns null. The report carries
-        // the name alone, so the message is not visible here.
+        // The swapped chunks fail their index-bound AAD. was-client maps the
+        // cipher's `IntegrityError` to `EncryptionError` on the chunked read
+        // path. The report carries the name alone, so the cause is not
+        // visible here.
         expect(report).toEqual(
           tally({
             accepted: 2,
             unopenable: 1,
-            unopenableCauses: { Error: 1 }
+            unopenableCauses: { EncryptionError: 1 }
           })
         )
       })
