@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/wallet-core": "link:../wallet-core",
+    "@interop/wallet-core": "^0.107.0",
     "@interop/was-client": "^0.97.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",

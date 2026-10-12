@@ -1,5 +1,11 @@
 # @interop/wallet-backup Changelog
 
+## 0.6.1 - TBD
+
+### Changed
+
+- Update to latest wallet-core and storage-core deps.
+
 ## 0.6.0 - 2026-10-11
 
 ### Changed
