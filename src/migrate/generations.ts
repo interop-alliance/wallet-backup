@@ -72,15 +72,27 @@ export async function recoverGenerations({
  * Builds one decrypting cipher per generation for one collection, newest first.
  * A generation that is a recipient of no epoch of this collection is left out
  * rather than fatal: on a torn cascade that is the normal state, and the
- * generations that do open epochs still open their Resources. No `spaceId` is
- * passed, so the cipher builds no transport and the walk issues no request.
+ * generations that do open epochs still open their Resources. A generation
+ * whose entry in the current epoch names it but fails its key-wrap check is
+ * different: that is a tamper signal for this collection's descriptor, and
+ * the cipher's `IntegrityError` is not mistaken for a non-recipient. The
+ * generation is dropped and named in `dropped`, so the report can carry the
+ * signal, and the collection still opens with the generations whose entries
+ * are sound. Only when no generation survives does the signal travel, as the
+ * first `IntegrityError` raised, and the collection is stopped under it. An
+ * entry that names a generation only in an older epoch is unwrapped on first
+ * use, so its failure arrives at the Resource instead. Any other construction
+ * failure is a wiring fault and travels untouched. No `spaceId` is passed, so
+ * the cipher builds no transport and the migration issues no request.
  *
  * @param options {object}
  * @param options.generations {UserKeyGeneration[]}   newest first
  * @param options.collectionId {string}
  * @param options.encryption {CollectionEncryption}   the collection's
  *   descriptor, read from its archived governing log
- * @returns {Promise<EdvDocCipher[]>}
+ * @returns {Promise<{ ciphers: EdvDocCipher[]; dropped: string[] }>}   the
+ *   ciphers that built, newest first, and the error name of each generation
+ *   dropped for failing its key-wrap check
  */
 export async function ciphersForCollection({
   generations,
@@ -90,8 +102,10 @@ export async function ciphersForCollection({
   generations: UserKeyGeneration[]
   collectionId: string
   encryption: CollectionEncryption
-}): Promise<EdvDocCipher[]> {
+}): Promise<{ ciphers: EdvDocCipher[]; dropped: string[] }> {
   const ciphers: EdvDocCipher[] = []
+  const dropped: string[] = []
+  let firstIntegrityError: Error | undefined
   for (const generation of generations) {
     const { keyAgreementKey, keyResolver } = userKeyVaultKeys({
       userKey: generation
@@ -107,13 +121,21 @@ export async function ciphersForCollection({
       )
     } catch (err) {
       // A generation that is a recipient of no epoch here refuses at
-      // construction; every other cause is a real wiring fault and travels.
-      if ((err as Error).name !== 'KeyUnwrapError') {
+      // construction, and a kid-matched entry that fails its key-wrap check
+      // drops the generation. Every other cause is a wiring fault.
+      const name = (err as Error).name
+      if (name === 'IntegrityError') {
+        dropped.push(name)
+        firstIntegrityError ??= err as Error
+      } else if (name !== 'KeyUnwrapError') {
         throw err
       }
     }
   }
-  return ciphers
+  if (ciphers.length === 0 && firstIntegrityError !== undefined) {
+    throw firstIntegrityError
+  }
+  return { ciphers, dropped }
 }
 
 /**
@@ -123,14 +145,22 @@ export async function ciphersForCollection({
  * The envelope is bound to the collection id the ciphers were built for, so
  * one sealed for another collection is not opened.
  *
- * A schema that cannot be recovered refuses nothing: the answer is then
- * `undefined`, as it is for a schema that declares no index. Nothing about the
- * failure is logged, since the envelope's contents are secret.
+ * A schema that cannot be recovered refuses nothing: the collection still
+ * migrates, with no `indexSchema`, as it does for a schema that declares no
+ * index. What ended the attempt is named in `cause`, the error name, so the
+ * report can carry it; an `IntegrityError` there is a tamper signal, from a
+ * generation's epoch entry that names it but fails its key-wrap check or from
+ * an envelope that does not authenticate, and no older generation is tried
+ * after it. Only the name is handed on, since the envelope's contents are
+ * secret.
  *
  * @param options {object}
  * @param options.ciphers {EdvDocCipher[]}   newest generation first
  * @param options.custom {unknown}   the archived metadata's `custom` value
- * @returns {Promise<IndexSchema | undefined>}
+ * @returns {Promise<{ indexSchema?: IndexSchema; cause?: string }>}   the
+ *   schema when one was recovered and declares an index; otherwise the error
+ *   name that ended the attempt, or neither when every generation yielded or
+ *   the schema declares no index
  */
 export async function indexSchemaFromCustom({
   ciphers,
@@ -138,7 +168,7 @@ export async function indexSchemaFromCustom({
 }: {
   ciphers: EdvDocCipher[]
   custom: unknown
-}): Promise<IndexSchema | undefined> {
+}): Promise<{ indexSchema?: IndexSchema; cause?: string }> {
   for (const cipher of ciphers) {
     let schema: IndexSchema
     try {
@@ -147,13 +177,13 @@ export async function indexSchemaFromCustom({
       if ((err as Error).name === 'KeyUnwrapError') {
         continue
       }
-      return undefined
+      return { cause: (err as Error).name }
     }
     if (schema.indexes.length > 0) {
-      return schema
+      return { indexSchema: schema }
     }
   }
-  return undefined
+  return {}
 }
 
 /**

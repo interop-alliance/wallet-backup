@@ -148,24 +148,32 @@ otherwise. `generator` is the app the archived Collection Metadata object names,
 absent when it names none. `indexSchema` is the blinded-index schema an
 encrypted collection's archived metadata `custom` carries, opened with the
 recovered user key generations. It is absent when there is none, it declares no
-index, or it will not open, and the collection still migrates. `custom` is a
-plaintext collection's archived metadata `custom`, handed on as archived. An
-encrypted collection's `custom` is sealed to the old account's keys and is not
-handed on. A throw from `ensureCollection` stops that collection, with its name
-under `stoppedBy`, and no Resource of it is handed over. Any collection stopped
-before its first Resource, this way or for a missing log, counts its Resources
-as `unopenable` under the stopping cause. A throw named `QuotaExceededError`
-ends the whole walk. `importResource` follows the rules above. It receives
-`{ collectionId, resourceId, contentType }` plus the Resource's payload. An
-encrypted collection's Resource arrives decrypted. It is `json`, under
-`application/json`, when it decrypts to JSON. It is `bytes`, under its sealed
-content type (`application/octet-stream` when none was sealed), when it decrypts
-to binary or text. That covers a small binary Resource and a chunked one alike.
-A chunked Resource whose sealed type is `application/json` still arrives as
-`bytes`. A plaintext one's arrives as `json`, parsed, when its content type is
-`application/json` or an `application/...+json` type, and as raw `bytes`
-otherwise. Both keep their archived `resourceId`. A chunked Resource in a
-plaintext app collection or a standard collection is not opened. It counts as
+index, or it will not open, and the collection still migrates; when an error
+ended the attempt to open it, the collection's report entry names it under
+`indexSchemaCause`. `custom` is a plaintext collection's archived metadata
+`custom`, handed on as archived. An encrypted collection's `custom` is sealed to
+the old account's keys and is not handed on. A throw from `ensureCollection`
+stops that collection, with its name under `stoppedBy`, and no Resource of it is
+handed over. A descriptor whose current-epoch entry for a recovered generation
+fails its key-wrap check is a tamper signal, not a generation the migration
+skips: that generation is dropped, counted under `generationCauses` by error
+name (`IntegrityError`), and the collection opens with the generations whose
+entries are sound. When none survive, the collection stops under
+`IntegrityError`. Any collection stopped before its first Resource, this way or
+for a missing log, counts its Resources as `unopenable` under the stopping
+cause. A Resource whose own epoch entry fails that check is counted under
+`IntegrityError` too, and no older generation is tried for it. A throw named
+`QuotaExceededError` ends the whole walk. `importResource` follows the rules
+above. It receives `{ collectionId, resourceId, contentType }` plus the
+Resource's payload. An encrypted collection's Resource arrives decrypted. It is
+`json`, under `application/json`, when it decrypts to JSON. It is `bytes`, under
+its sealed content type (`application/octet-stream` when none was sealed), when
+it decrypts to binary or text. That covers a small binary Resource and a chunked
+one alike. A chunked Resource whose sealed type is `application/json` still
+arrives as `bytes`. A plaintext one's arrives as `json`, parsed, when its
+content type is `application/json` or an `application/...+json` type, and as raw
+`bytes` otherwise. Both keep their archived `resourceId`. A chunked Resource in
+a plaintext app collection or a standard collection is not opened. It counts as
 `unopenable` under `ChunkedResourceUnsupportedError`. `app-keys` is part of the
 wallet layout and is not migrated yet.
 

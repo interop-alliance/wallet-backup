@@ -23,6 +23,15 @@ import type { SinkOutcome } from './sink.js'
  * consecutive failures ended the collection, carrying the last cause's name (or
  * the outcome word `failed` when the sink reported failure without throwing),
  * or when the collection was stopped before its first Resource.
+ *
+ * Two members carry a descriptor fault the collection migrated in spite of.
+ * `generationCauses` names, by error name, the recovered generations dropped
+ * before the first Resource because their current-epoch entry failed its
+ * key-wrap check, with the number of generations each name accounts for.
+ * `indexSchemaCause` names the error that ended the attempt to open the
+ * sealed index schema, so the collection was ensured without one. Both are
+ * present only when they mean something; an `IntegrityError` in either is a
+ * tamper signal on the archived descriptor or metadata, not a missing key.
  */
 export interface MigrationCollectionReport {
   accepted: number
@@ -32,6 +41,8 @@ export interface MigrationCollectionReport {
   unopenable: number
   stoppedBy?: string
   unopenableCauses?: Record<string, number>
+  generationCauses?: Record<string, number>
+  indexSchemaCause?: string
 }
 
 /**
@@ -60,6 +71,10 @@ export interface MigrationReport {
  * @param counts {Map<string, TValue>}
  * @returns {Record<string, TValue>}
  */
+function increment(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1)
+}
+
 export function keyedRecord<TValue>(
   counts: Map<string, TValue>
 ): Record<string, TValue> {
@@ -85,7 +100,9 @@ export class CollectionTally {
   failed = 0
   unopenable = 0
   stoppedBy?: string
+  indexSchemaCause?: string
   readonly #unopenableCauses = new Map<string, number>()
+  readonly #generationCauses = new Map<string, number>()
 
   /**
    * Records one sink outcome.
@@ -103,10 +120,17 @@ export class CollectionTally {
    */
   countUnopenable(cause: string): void {
     this.unopenable += 1
-    this.#unopenableCauses.set(
-      cause,
-      (this.#unopenableCauses.get(cause) ?? 0) + 1
-    )
+    increment(this.#unopenableCauses, cause)
+  }
+
+  /**
+   * Records one recovered generation dropped at cipher construction, under
+   * the error name that explains it.
+   * @param cause {string}   the error name
+   * @returns {void}
+   */
+  countDroppedGeneration(cause: string): void {
+    increment(this.#generationCauses, cause)
   }
 
   /**
@@ -127,6 +151,12 @@ export class CollectionTally {
     }
     if (this.#unopenableCauses.size > 0) {
       report.unopenableCauses = keyedRecord(this.#unopenableCauses)
+    }
+    if (this.#generationCauses.size > 0) {
+      report.generationCauses = keyedRecord(this.#generationCauses)
+    }
+    if (this.indexSchemaCause !== undefined) {
+      report.indexSchemaCause = this.indexSchemaCause
     }
     return report
   }

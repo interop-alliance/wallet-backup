@@ -522,3 +522,53 @@ landing first. WBU-7 waits only on the Q1 answer, not on WBU-6's implementation.
 Q1 was settled 2026-09-28: a bytes Resource in an encrypted collection is
 written at its archived `resourceId`, and that id is its identity. WBU-7 shares
 WBU-6's was-client write-by-id path.
+
+### WBU-9: A kid-matched recipient entry that fails its key-wrap check now arrives as `IntegrityError`
+
+- status: done (2026-10-27)
+- priority: low
+- labels: migrate, encryption, errors
+- touches:
+  - wallet-backup: `src/migrate/generations.ts` (`buildGenerationCiphers`'s
+    construction catch, `indexSchemaFromCustom`),
+    `src/migrate/collectionWalk.ts` (`openResource`'s fallback signal and the
+    report's cause names), the migration tests, README's report vocabulary if it
+    lists cause names. Shipped 2026-10-27: `ciphersForCollection` (the function
+    `buildGenerationCiphers` names) keeps rethrowing, and the walk's existing
+    per-collection catch reports it as `stoppedBy: 'IntegrityError'`; three
+    tests in `test/node/migrate.test.ts`; JSDoc on all three sites; README,
+    ARCHITECTURE invariant 10, CHANGELOG 0.6.2.
+  - freewallet: the migration report's cause-to-copy map has no `IntegrityError`
+    arm; filed there as FW-692 (2026-10-27). Resolved as tracked there: the arm
+    lands with FW-692, not with this item.
+- acceptance:
+  - [x] `buildGenerationCiphers` is decided and pinned by a test: a generation
+        whose write-epoch entry names it and fails its AES-KW check either stops
+        the walk with `IntegrityError` as the cause, or is reported per
+        collection, but is never silently skipped as a non-recipient.
+  - [x] A test pins that a Resource whose lazily unwrapped epoch entry fails the
+        check is counted under `unopenableCauses.IntegrityError`, and that no
+        later generation is tried for it.
+  - [x] A test pins that `indexSchemaFromCustom` yields `undefined` on an
+        `IntegrityError`, and its JSDoc says so.
+  - [x] `openResource`'s JSDoc names `IntegrityError` among the answers that
+        stop the generation fallback.
+
+Context: was-client 0.99.1 changed what a corrupt recipient entry raises. A
+descriptor `recipients` entry whose `kid` is the reading key's own id, but whose
+wrapped epoch key fails the AES-KW integrity check, used to raise
+`KeyUnwrapError`, the same error as "this key is not a recipient". It now raises
+`IntegrityError`, eagerly when the cipher is built (the write epoch) and on
+first decrypt for a lazily unwrapped read epoch. A malformed entry still raises
+`KeyUnwrapError`. The walk uses the `KeyUnwrapError` name as its fall-through
+signal at three places, so the new error changes behavior at each:
+`buildGenerationCiphers` rethrows it, which aborts the whole walk at the first
+such generation; `openResource` records it as the Resource's cause and tries no
+further generation; `indexSchemaFromCustom` answers `undefined`. The last two
+are the right answers for a tamper signal, but none of the three is tested or
+documented, and the first may be too blunt for an archive in which only one old
+generation's entry is damaged. The sealed backup credential is unaffected: a
+wrong passphrase derives a key with a different id, so its entry is not
+kid-matched and the refusal stays `KeyUnwrapError`.
+
+discovered-from: was-client's reclassification of the failure (2026-10-27).

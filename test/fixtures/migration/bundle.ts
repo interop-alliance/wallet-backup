@@ -47,6 +47,7 @@ import {
   packSpaceArchive
 } from '@interop/space-archive'
 import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
+import { base64urlnopad } from '@scure/base'
 import { writeBundle, BUNDLE_ROLE } from '../../../src/index.js'
 import type { BundleMeta } from '../../../src/index.js'
 
@@ -144,6 +145,17 @@ export async function rosterDescriptor({
 }
 
 /**
+ * Flips one bit of a base64url-nopad string's first decoded byte.
+ * @param encoded {string}
+ * @returns {string}
+ */
+export function flipFirstByte(encoded: string): string {
+  const bytes = base64urlnopad.decode(encoded)
+  bytes[0] = (bytes[0] ?? 0) ^ 0x01
+  return base64urlnopad.encode(bytes)
+}
+
+/**
  * Builds a collection's epoch roster: one epoch per entry, each sealed to the
  * generations that entry names. A collection whose newest epoch is sealed to
  * an older generation alone is a torn cascade.
@@ -153,14 +165,20 @@ export async function rosterDescriptor({
  *   first, each naming the generations that may open it
  * @param [options.hmacFor] {Generation[]}   when given, the descriptor
  *   declares a blinded-index key wrapped to these generations
+ * @param [options.corruptEntryFor] {object}   when given, the named
+ *   generation's recipient entry in the epoch at `epochIndex` (into
+ *   `openedBy`) keeps its `kid` but has its wrapped key's bytes altered, so
+ *   the entry still names the generation and fails its AES-KW check
  * @returns {Promise<CollectionEncryption>}
  */
 export async function collectionDescriptor({
   openedBy,
-  hmacFor
+  hmacFor,
+  corruptEntryFor
 }: {
   openedBy: Generation[][]
   hmacFor?: Generation[]
+  corruptEntryFor?: { generation: Generation; epochIndex: number }
 }): Promise<CollectionEncryption> {
   const epochs = []
   for (const readers of openedBy) {
@@ -176,6 +194,20 @@ export async function collectionDescriptor({
         )
       )
     })
+  }
+  if (corruptEntryFor !== undefined) {
+    const kid = userKeyAsRecipient({ userKey: corruptEntryFor.generation }).id
+    const entry = epochs[corruptEntryFor.epochIndex]!.recipients.find(
+      recipient => recipient.header.kid === kid
+    )
+    if (entry === undefined) {
+      throw new Error(
+        'The generation to corrupt is not a recipient of that epoch.'
+      )
+    }
+    // Same length, one bit changed: well-formed, so the unwrap reaches the
+    // integrity check rather than refusing the entry as malformed.
+    entry.encrypted_key = flipFirstByte(entry.encrypted_key)
   }
   const descriptor: CollectionEncryption = {
     scheme: 'edv',

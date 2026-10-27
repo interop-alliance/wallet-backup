@@ -231,7 +231,7 @@ export async function migrateBundle({
       let ciphers: EdvDocCipher[] | undefined
       try {
         if (logBytes !== undefined) {
-          ciphers = await ciphersForCollection({
+          const built = await ciphersForCollection({
             generations,
             collectionId,
             encryption: descriptorFromCollectionLogFile({
@@ -239,6 +239,10 @@ export async function migrateBundle({
               collectionId
             })
           })
+          ciphers = built.ciphers
+          for (const cause of built.dropped) {
+            tally.countDroppedGeneration(cause)
+          }
         } else if (encrypted) {
           throw new CollectionLogUnreadableError(
             `The archived collection "${collectionId}" carries no governing ` +
@@ -247,11 +251,15 @@ export async function migrateBundle({
         }
         if (app !== undefined) {
           // An encrypted collection's blinded-index schema travels sealed in
-          // its metadata `custom`; one that will not open is not handed on.
-          const indexSchema =
+          // its metadata `custom`; one that will not open is not handed on,
+          // and what ended the attempt is named on the tally.
+          const { indexSchema, cause: indexSchemaCause } =
             ciphers !== undefined && app.custom !== undefined
               ? await indexSchemaFromCustom({ ciphers, custom: app.custom })
-              : undefined
+              : {}
+          if (indexSchemaCause !== undefined) {
+            tally.indexSchemaCause = indexSchemaCause
+          }
           await app.ensureCollection({
             collectionId,
             encrypted,
@@ -268,9 +276,11 @@ export async function migrateBundle({
         // Resources have already reached the sink by now, so nothing here may
         // end the walk without a report. An unreadable log is the expected
         // cause; any other (a descriptor body no cipher can be built from, a
-        // host that could not make the collection) is named as it came. No
-        // Resource of this collection is handed over, so each is counted as
-        // unopenable under the cause rather than dropped from the report.
+        // descriptor whose current-epoch entry fails its key-wrap check for
+        // every recovered generation, a host that could not make the
+        // collection) is named as it came. No Resource of this collection is
+        // handed over, so each is counted as unopenable under the cause
+        // rather than dropped from the report.
         const cause = (err as Error).name
         tally.stoppedBy = cause
         const resources = survey.walkedResources.get(collectionId) ?? 0

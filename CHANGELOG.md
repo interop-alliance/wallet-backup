@@ -1,5 +1,24 @@
 # @interop/wallet-backup Changelog
 
+## 0.6.2 - TBD
+
+### Changed
+
+- A descriptor recipient entry that names a recovered generation but fails its
+  AES-KW check (was-client's `IntegrityError`) is a tamper signal, not a
+  generation the migration skips as a non-recipient. In the current epoch the
+  generation is dropped and the collection opens with the rest; the report's new
+  `generationCauses` counts the dropped generations by error name. When no
+  generation survives, the collection stops under `IntegrityError` with every
+  Resource counted as unopenable. In an older epoch the error is the Resource's
+  cause, and no older generation is tried. A sealed index schema whose epoch
+  entry fails the check is not handed on, and the report's new
+  `indexSchemaCause` names the error. Both report members are optional and
+  additive. Pinned by tests; before, the same entry was reported as
+  `KeyUnwrapError` (WBU-9).
+- Requires `@interop/was-client` 0.99.1 (peer range bumped). Update to latest
+  storage-core, space-archive, vh-resource-log and wallet-core deps.
+
 ## 0.6.1 - 2026-10-12
 
 ### Changed

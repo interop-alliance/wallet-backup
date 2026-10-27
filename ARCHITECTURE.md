@@ -176,7 +176,16 @@ The dependency direction inside this package is one way: `migrate/` reads
     parse, the chunk source, the decrypt, the `Blob` read) sits inside the
     per-Resource open catch, which counts a throw under its name and rethrows
     only an abort, as the signal's reason. The sink call keeps its own catch, so
-    a quota refusal still ends the walk.
+    a quota refusal still ends the walk. Only `KeyUnwrapError` moves the walk to
+    an older generation. An `IntegrityError` (an epoch entry that names a
+    generation but fails its key-wrap check, or an envelope that does not
+    authenticate) is a tamper signal, and is never mistaken for a missing key.
+    When a cipher refuses at construction, the generation is dropped and counted
+    under the report's `generationCauses`, and the collection opens with the
+    rest; it stops under `IntegrityError` only when no generation survives. On a
+    Resource it is that Resource's cause, with no older generation tried. On the
+    sealed index schema it ends the attempt and is named under
+    `indexSchemaCause`, and the collection migrates without an index.
 
 ## Ownership heuristics
 

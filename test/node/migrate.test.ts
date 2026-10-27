@@ -33,6 +33,7 @@ import {
 } from '@interop/was-client/edv/core'
 import type {
   ChunkSource,
+  EdvDocCipher,
   RecipientPublicKey
 } from '@interop/was-client/edv/core'
 import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
@@ -60,6 +61,7 @@ import type {
   SinkOutcome
 } from '../../src/index.js'
 import { walkCollection } from '../../src/migrate/collectionWalk.js'
+import { indexSchemaFromCustom } from '../../src/migrate/generations.js'
 import { CollectionTally } from '../../src/migrate/report.js'
 import {
   buildBundle,
@@ -107,6 +109,8 @@ interface FixtureCollection {
   sealedEntries?: (encryption: CollectionEncryption) => Promise<ArchiveEntry[]>
   /** the generations the descriptor's blinded-index key is wrapped to */
   hmacFor?: Generation[]
+  /** as `collectionDescriptor` takes it */
+  corruptEntryFor?: { generation: Generation; epochIndex: number }
   /**
    * seals `resources` under this epoch of the descriptor (an index into
    * `openedBy`) instead of its current one
@@ -260,7 +264,8 @@ async function fixtureSpaceEntries({
     } else {
       const encryption = await collectionDescriptor({
         openedBy: collection.openedBy,
-        ...(collection.hmacFor !== undefined && { hmacFor: collection.hmacFor })
+        hmacFor: collection.hmacFor,
+        corruptEntryFor: collection.corruptEntryFor
       })
       if (collection.sealedIndexSchema !== undefined) {
         const { schema, by, boundTo, underFirstEpoch } =
@@ -861,6 +866,130 @@ describe('migrateBundle', () => {
       unopenable: 2,
       unopenableCauses: { KeyUnwrapError: 2 }
     })
+  })
+
+  it('drops a generation whose current-epoch entry fails its key-wrap check, names it, and opens the collection with the rest', async () => {
+    const [older, newer] = await mintGenerations(2)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [older!, newer!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          // The corrupt entry names the newer generation, so its cipher
+          // refuses at construction with `IntegrityError`. The older
+          // generation's entry is sound and opens both Resources. The report
+          // carries the dropped generation under its cause, which a silent
+          // skip as a non-recipient would not.
+          openedBy: [[older!, newer!]],
+          corruptEntryFor: { generation: newer!, epochIndex: 0 }
+        },
+        {
+          collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+          resources: [{ cid: 'z-1' }],
+          openedBy: [[older!, newer!]]
+        }
+      ]
+    })
+    const sink = recordingSink()
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(sink.calls.map(call => call.collectionId)).toEqual([
+      CONTACTS_COLLECTION,
+      CONTACTS_COLLECTION,
+      PRIVATE_CREDENTIALS_COLLECTION
+    ])
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ accepted: 2, generationCauses: { IntegrityError: 1 } })
+    )
+    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
+  })
+
+  it('stops a collection whose current-epoch entry fails its key-wrap check for every recovered generation, and migrates the rest', async () => {
+    const [generation] = await mintGenerations(1)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [generation!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-1' }, { contactId: 'c-2' }],
+          // The one recovered generation's entry is corrupt, so no cipher
+          // builds and the tamper signal stops the collection rather than
+          // reporting its Resources as opened by no generation.
+          openedBy: [[generation!]],
+          corruptEntryFor: { generation: generation!, epochIndex: 0 }
+        },
+        {
+          collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+          resources: [{ cid: 'z-1' }],
+          openedBy: [[generation!]]
+        }
+      ]
+    })
+    const sink = recordingSink()
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(sink.calls.map(call => call.collectionId)).toEqual([
+      PRIVATE_CREDENTIALS_COLLECTION
+    ])
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({
+        unopenable: 2,
+        unopenableCauses: { IntegrityError: 2 },
+        stoppedBy: 'IntegrityError'
+      })
+    )
+    expect(report.collections[PRIVATE_CREDENTIALS_COLLECTION]).toEqual(
+      tally({ accepted: 1 })
+    )
+  })
+
+  it('counts a Resource whose lazily unwrapped epoch entry fails its key-wrap check, trying no older generation', async () => {
+    const [older, newer] = await mintGenerations(2)
+    const { code, recipient } = await recoverySecret()
+    const bundle = await fixtureBundle({
+      generations: [older!, newer!],
+      recipients: [recipient],
+      collections: [
+        {
+          collectionId: CONTACTS_COLLECTION,
+          resources: [{ contactId: 'c-old' }],
+          // The newest generation's current-epoch entry is sound, so its
+          // cipher builds, and its first-epoch entry is unwrapped only when a
+          // Resource under that epoch is opened. The older generation's
+          // first-epoch entry is sound: a `KeyUnwrapError` would fall back to
+          // it, and an `IntegrityError` does not.
+          openedBy: [
+            [older!, newer!],
+            [older!, newer!]
+          ],
+          resourcesEpochIndex: 0,
+          corruptEntryFor: { generation: newer!, epochIndex: 0 }
+        }
+      ]
+    })
+    const sink = recordingSink()
+    const report = await migrateBundle({
+      bundle,
+      secret: { recoveryCode: code },
+      sink
+    })
+    expect(sink.calls).toHaveLength(0)
+    expect(report.collections[CONTACTS_COLLECTION]).toEqual(
+      tally({ unopenable: 1, unopenableCauses: { IntegrityError: 1 } })
+    )
   })
 
   it('reports a chunked Resource by name and migrates the rest', async () => {
@@ -1869,6 +1998,38 @@ describe('migrateBundle', () => {
       expect(report.collections['notes']!.accepted).toBe(1)
     })
 
+    it('hands no index schema when the sealing epoch entry fails its key-wrap check, names the cause, and tries no older generation', async () => {
+      const { sink, report } = await runApp({
+        generationCount: 2,
+        collections: ([older, newer]) => [
+          {
+            collectionId: 'notes',
+            resources: [{ note: 'one' }],
+            // The schema is sealed under the first epoch, whose entry for the
+            // newest generation is corrupt. The older generation's entry is
+            // sound and would open it on a `KeyUnwrapError`; on an
+            // `IntegrityError` no further generation is tried. The Resource
+            // sits under the current epoch, so it still migrates.
+            openedBy: [
+              [older!, newer!],
+              [older!, newer!]
+            ],
+            hmacFor: [older!, newer!],
+            corruptEntryFor: { generation: newer!, epochIndex: 0 },
+            sealedIndexSchema: {
+              schema: indexSchema,
+              by: older!,
+              underFirstEpoch: true
+            }
+          }
+        ]
+      })
+      expect(sink.ensured).toEqual([{ collectionId: 'notes', encrypted: true }])
+      expect(report.collections['notes']).toEqual(
+        tally({ accepted: 1, indexSchemaCause: 'IntegrityError' })
+      )
+    })
+
     it('hands no index schema when the sealed custom will not open, and migrates the Resources', async () => {
       const { sink, report } = await runApp({
         collections: ([generation]) => [
@@ -2763,5 +2924,54 @@ describe('migrateBundle', () => {
       expect(report.collections['app-a']!.stoppedBy).toBe('QuotaExceededError')
       expect(report.collections[WALLET_ACTIVITY_COLLECTION]).toBeUndefined()
     })
+  })
+})
+
+describe('indexSchemaFromCustom', () => {
+  const schema: IndexSchema = {
+    revision: 1,
+    indexes: [{ attribute: 'content.type', addedIn: 1 }]
+  }
+
+  /**
+   * A cipher stub whose `applyMeta` throws under `name`, or answers `schema`
+   * when `name` is undefined. The ciphers are typed by what the function
+   * reads, so the stub needs nothing more.
+   */
+  function cipherThat(name?: string): EdvDocCipher {
+    return {
+      async applyMeta() {
+        if (name !== undefined) {
+          throw Object.assign(new Error(name), { name })
+        }
+        return schema
+      }
+    } as unknown as EdvDocCipher
+  }
+
+  it('falls back past a generation that is not a recipient of the sealing epoch', async () => {
+    const ciphers = [cipherThat('KeyUnwrapError'), cipherThat()]
+    await expect(
+      indexSchemaFromCustom({ ciphers, custom: {} })
+    ).resolves.toEqual({ indexSchema: schema })
+  })
+
+  it('names an IntegrityError as the cause without trying an older generation', async () => {
+    const older = cipherThat()
+    const applyMeta = vi.spyOn(older, 'applyMeta')
+    const ciphers = [cipherThat('IntegrityError'), older]
+    await expect(
+      indexSchemaFromCustom({ ciphers, custom: {} })
+    ).resolves.toEqual({ cause: 'IntegrityError' })
+    expect(applyMeta).not.toHaveBeenCalled()
+  })
+
+  it('answers nothing when every generation yields or the schema declares no index', async () => {
+    await expect(
+      indexSchemaFromCustom({
+        ciphers: [cipherThat('KeyUnwrapError')],
+        custom: {}
+      })
+    ).resolves.toEqual({})
   })
 })

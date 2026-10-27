@@ -102,10 +102,13 @@ async function handedPlaintext(plaintext: unknown): Promise<ReadResult> {
  * Opens one envelope, newest generation first, and reads what it decrypts to.
  * A `KeyUnwrapError` is the fallback signal -- this generation holds no key for
  * that Resource's epoch -- and the next generation is tried. That happens
- * before any chunk is read. Anything else is this Resource's answer: an
- * `UnknownEpochError` means the descriptor lists no such epoch, which no other
- * generation can change. A throw after an abort is the abort, and is rethrown
- * as the signal's reason.
+ * before any chunk is read. Anything else is this Resource's answer, and no
+ * further generation is tried: an `UnknownEpochError` means the descriptor
+ * lists no such epoch, which no other generation can change, and an
+ * `IntegrityError` means this generation's entry for the epoch names it but
+ * fails its key-wrap check, or the envelope does not authenticate, which is a
+ * tamper signal rather than a missing key. A throw after an abort is the
+ * abort, and is rethrown as the signal's reason.
  *
  * @param options {object}
  * @param options.ciphers {ResourceCipher[]}   newest generation first

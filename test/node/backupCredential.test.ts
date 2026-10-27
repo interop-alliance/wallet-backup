@@ -9,6 +9,7 @@ import {
   unpackBackupCredential
 } from '../../src/index.js'
 import type { PackedBackupCredential } from '../../src/index.js'
+import { flipFirstByte } from '../fixtures/migration/bundle.js'
 
 const secret = crypto.getRandomValues(new Uint8Array(32))
 const exportPassphrase = 'correct horse battery staple'
@@ -25,17 +26,6 @@ async function errorName(run: () => Promise<unknown>): Promise<string> {
     return (err as Error).name
   }
   throw new Error('The call did not throw.')
-}
-
-/**
- * Flips one bit of a base64url-nopad string's first decoded byte.
- * @param encoded {string}
- * @returns {string}
- */
-function flipFirstByte(encoded: string): string {
-  const bytes = base64urlnopad.decode(encoded)
-  bytes[0] = (bytes[0] ?? 0) ^ 0x01
-  return base64urlnopad.encode(bytes)
 }
 
 /**
