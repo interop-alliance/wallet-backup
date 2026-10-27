@@ -572,3 +572,39 @@ wrong passphrase derives a key with a different id, so its entry is not
 kid-matched and the refusal stays `KeyUnwrapError`.
 
 discovered-from: was-client's reclassification of the failure (2026-10-27).
+
+### WBU-10: A failed lazy epoch unwrap is repeated for every Resource under that epoch
+
+- status: done (2026-10-27)
+- priority: low
+- labels: migrate, encryption, performance
+- touches:
+  - was-client: the EDV codec's lazy read-epoch unwrap, so a failed unwrap of
+    one epoch is remembered on the cipher and later decrypts under that epoch
+    fail at once; its ARCHITECTURE/AGENTS files if they describe the unwrap.
+    Shipped 2026-10-27 in 0.99.1: `lazyEpochKey` in `src/edv/epochKeys.ts` keeps
+    the `IntegrityError` and rethrows it from `deriveSecret`; a test in
+    `test/node/key-epochs.test.ts` counts the reader's derivations; the
+    ARCHITECTURE paragraph on the three unwrap outcomes and CHANGELOG 0.99.1.
+  - wallet-backup: nothing to change once was-client remembers the failure; bump
+    the was-client peer range to the version that does, and note it in
+    CHANGELOG. Shipped 2026-10-27: the peer range already names 0.99.1 (WBU-9),
+    the migration test over three Resources counts derivations per generation,
+    CHANGELOG 0.6.2.
+- acceptance:
+  - [x] was-client caches a lazy epoch unwrap that raised `IntegrityError`, so
+        the second decrypt under that epoch raises it without a second unwrap.
+  - [x] The migration test for a corrupt older-epoch entry runs over several
+        Resources under that epoch and a was-client-side spy sees one unwrap.
+
+Context: the newest generation's cipher unwraps its older-epoch entries lazily,
+on the first Resource sealed under that epoch. If that entry fails its AES-KW
+check the migration records `IntegrityError` as the Resource's cause and
+correctly tries no older generation, but was-client does not remember that the
+unwrap failed. Every further Resource under the same epoch repeats the same ECDH
+and AES-KW attempt before being counted. The result is correct; the cost is one
+futile unwrap per Resource under a damaged epoch. The cipher owns the epoch
+bookkeeping, so the memo belongs there rather than in this package, which
+deliberately does not read the epoch id out of an envelope.
+
+discovered-from: WBU-9 (code review of its change set, 2026-10-27).

@@ -21,36 +21,6 @@ conventions live in [AGENTS.md](AGENTS.md) under "Roadmap & Task Conventions".
 
 ---
 
-### WBU-10: A failed lazy epoch unwrap is repeated for every Resource under that epoch
-
-- status: todo
-- priority: low
-- labels: migrate, encryption, performance
-- touches:
-  - was-client: the EDV codec's lazy read-epoch unwrap, so a failed unwrap of
-    one epoch is remembered on the cipher and later decrypts under that epoch
-    fail at once; its ARCHITECTURE/AGENTS files if they describe the unwrap.
-  - wallet-backup: nothing to change once was-client remembers the failure; bump
-    the was-client peer range to the version that does, and note it in
-    CHANGELOG.
-- acceptance:
-  - [ ] was-client caches a lazy epoch unwrap that raised `IntegrityError`, so
-        the second decrypt under that epoch raises it without a second unwrap.
-  - [ ] The migration test for a corrupt older-epoch entry runs over several
-        Resources under that epoch and a was-client-side spy sees one unwrap.
-
-Context: the newest generation's cipher unwraps its older-epoch entries lazily,
-on the first Resource sealed under that epoch. If that entry fails its AES-KW
-check the migration records `IntegrityError` as the Resource's cause and
-correctly tries no older generation, but was-client does not remember that the
-unwrap failed. Every further Resource under the same epoch repeats the same ECDH
-and AES-KW attempt before being counted. The result is correct; the cost is one
-futile unwrap per Resource under a damaged epoch. The cipher owns the epoch
-bookkeeping, so the memo belongs there rather than in this package, which
-deliberately does not read the epoch id out of an envelope.
-
-discovered-from: WBU-9 (code review of its change set, 2026-10-27).
-
 ### WBU-11: Settle the term "walk" in the glossary and the prose that uses it
 
 - status: todo

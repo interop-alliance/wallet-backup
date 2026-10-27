@@ -18,6 +18,10 @@
   `KeyUnwrapError` (WBU-9).
 - Requires `@interop/was-client` 0.99.1 (peer range bumped). Update to latest
   storage-core, space-archive, vh-resource-log and wallet-core deps.
+- A corrupt older-epoch entry costs one unwrap per collection, not one per
+  Resource under that epoch: was-client 0.99.1 remembers the failed check on the
+  cipher. Nothing changed here; a migration test over several Resources under
+  such an epoch counts the key-agreement derivations (WBU-10).
 
 ## 0.6.1 - 2026-10-12
 

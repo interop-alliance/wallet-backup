@@ -36,6 +36,7 @@ import type {
   EdvDocCipher,
   RecipientPublicKey
 } from '@interop/was-client/edv/core'
+import type { UserKey } from '@interop/wallet-core/keys/userKey'
 import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
 import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
 import {
@@ -84,6 +85,41 @@ import {
   FIXTURE_SPACE_ID
 } from '../fixtures/migration/bundle.js'
 import type { BytesFile, Generation } from '../fixtures/migration/bundle.js'
+
+/**
+ * ECDH derivations on each recovered generation's key-agreement key, by
+ * generation id. Every epoch unwrap starts with one, so this is the unwrap
+ * count per generation.
+ */
+const derivationsByGeneration = new Map<string, number>()
+
+vi.mock('@interop/wallet-core/keys/userKey', async importOriginal => {
+  const original =
+    await importOriginal<typeof import('@interop/wallet-core/keys/userKey')>()
+  return {
+    ...original,
+    userKeyVaultKeys({ userKey }: { userKey: UserKey }) {
+      const { keyAgreementKey, ...keys } = original.userKeyVaultKeys({
+        userKey
+      })
+      return {
+        ...keys,
+        keyAgreementKey: {
+          ...keyAgreementKey,
+          async deriveSecret(
+            ...args: Parameters<typeof keyAgreementKey.deriveSecret>
+          ) {
+            derivationsByGeneration.set(
+              userKey.id,
+              (derivationsByGeneration.get(userKey.id) ?? 0) + 1
+            )
+            return keyAgreementKey.deriveSecret(...args)
+          }
+        }
+      }
+    }
+  }
+})
 
 /**
  * One collection of a fixture account.
@@ -956,7 +992,7 @@ describe('migrateBundle', () => {
     )
   })
 
-  it('counts a Resource whose lazily unwrapped epoch entry fails its key-wrap check, trying no older generation', async () => {
+  it('counts every Resource whose lazily unwrapped epoch entry fails its key-wrap check after one unwrap, trying no older generation', async () => {
     const [older, newer] = await mintGenerations(2)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -965,7 +1001,11 @@ describe('migrateBundle', () => {
       collections: [
         {
           collectionId: CONTACTS_COLLECTION,
-          resources: [{ contactId: 'c-old' }],
+          resources: [
+            { contactId: 'c-old-1' },
+            { contactId: 'c-old-2' },
+            { contactId: 'c-old-3' }
+          ],
           // The newest generation's current-epoch entry is sound, so its
           // cipher builds, and its first-epoch entry is unwrapped only when a
           // Resource under that epoch is opened. The older generation's
@@ -981,6 +1021,7 @@ describe('migrateBundle', () => {
       ]
     })
     const sink = recordingSink()
+    derivationsByGeneration.clear()
     const report = await migrateBundle({
       bundle,
       secret: { recoveryCode: code },
@@ -988,8 +1029,14 @@ describe('migrateBundle', () => {
     })
     expect(sink.calls).toHaveLength(0)
     expect(report.collections[CONTACTS_COLLECTION]).toEqual(
-      tally({ unopenable: 1, unopenableCauses: { IntegrityError: 1 } })
+      tally({ unopenable: 3, unopenableCauses: { IntegrityError: 3 } })
     )
+    // The newest generation's cipher unwraps its write epoch at construction
+    // and the damaged epoch once, on the first Resource. was-client remembers
+    // the failed check, so the other two Resources are counted without another
+    // unwrap. The older generation only ever unwraps its write epoch.
+    expect(derivationsByGeneration.get(newer!.id)).toBe(2)
+    expect(derivationsByGeneration.get(older!.id)).toBe(1)
   })
 
   it('reports a chunked Resource by name and migrates the rest', async () => {
