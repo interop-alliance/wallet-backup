@@ -22,9 +22,10 @@
  * Anywhere else a chunked Resource is refused and counted.
  *
  * Two rules end something early. A run of consecutive failures ends this
- * collection (an outage, not a Resource that will never land), and the walk
- * moves on. A sink throw named for the server's quota refusal ends the whole
- * walk, which this pass reports back to its caller rather than deciding.
+ * collection (an outage, not a Resource that will never land), and the
+ * migration moves on. A sink throw named for the server's quota refusal ends
+ * the whole migration, which this pass reports back to its caller rather than
+ * deciding.
  */
 import {
   classifyCollectionFile,
@@ -38,12 +39,15 @@ import type { ChunkSource } from '@interop/was-client/edv/core'
 import { ChunkedResourceUnsupportedError } from '../errors.js'
 import type { ByteSource } from '@interop/space-archive'
 import type { CollectionTally } from './report.js'
-import { MAX_CONSECUTIVE_FAILURES, WALK_STOPPING_ERROR_NAME } from './sink.js'
+import {
+  MAX_CONSECUTIVE_FAILURES,
+  MIGRATION_STOPPING_ERROR_NAME
+} from './sink.js'
 import type { AppCollectionResource, SinkOutcome } from './sink.js'
 
 /**
- * The name of the error was-client raises when a chunk source holds no chunk
- * at an index the envelope's sealed count asks for. The walk counts a stray
+ * The name of the error was-client raises when a chunk source holds no chunk at
+ * an index the envelope's sealed count asks for. The migration counts a stray
  * chunk directory under the same name. Matched by name, since the error is
  * minted in was-client and its class is not reachable from the offline entry.
  */
@@ -248,7 +252,7 @@ function chunkSourceOver({
 }
 
 /**
- * Walks one migrated collection's Resources.
+ * Runs one migrated collection's pass.
  *
  * @param options {object}
  * @param options.archive {ByteSource}   the account Space archive's bytes
@@ -259,7 +263,7 @@ function chunkSourceOver({
  *   newest first; `undefined` for a plaintext collection
  * @param options.chunked {ReadonlySet<string>}   the Resource ids the
  *   collection holds a chunk directory for
- * @param options.openChunked {boolean}   whether this walk reassembles chunked
+ * @param options.openChunked {boolean}   whether this pass reassembles chunked
  *   Resources: `true` only for an encrypted app collection. Otherwise each
  *   chunked Resource is counted under `ChunkedResourceUnsupportedError`
  * @param options.tally {CollectionTally}   filled in as the pass goes
@@ -267,9 +271,9 @@ function chunkSourceOver({
  *   every chunk read
  * @param [options.onProgress] {function}
  * @returns {Promise<{ stopped?: string }>}   the cause name when a quota
- *   refusal ended the whole walk
+ *   refusal ended the whole migration
  */
-export async function walkCollection({
+export async function migrateCollection({
   archive,
   collectionId,
   importResource,
@@ -330,9 +334,9 @@ export async function walkCollection({
    * @param options {object}
    * @param options.resourceId {string}
    * @param options.handed {ReadResult}
-   * @returns {Promise<{ stopped?: string } | undefined>}   the walk's result
-   *   when this Resource ended the collection or the walk, `undefined` to go
-   *   on
+   * @returns {Promise<{ stopped?: string } | undefined>}   the migration's
+   *   result when this Resource ended the collection or the migration,
+   *   `undefined` to go on
    */
   async function deliver({
     resourceId,
@@ -352,7 +356,7 @@ export async function walkCollection({
       const cause = (err as Error).name
       tally.countOutcome('failed')
       progress('failed')
-      if (cause === WALK_STOPPING_ERROR_NAME) {
+      if (cause === MIGRATION_STOPPING_ERROR_NAME) {
         return { stopped: cause }
       }
       consecutiveFailures += 1

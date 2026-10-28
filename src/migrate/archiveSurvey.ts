@@ -3,15 +3,15 @@
  */
 /**
  * One pass over the account Space archive that gathers everything small the
- * walk needs before it opens a Resource: the user key roster log, each migrated
- * collection's governing log, which Resources are stored in chunks, each app
- * collection's `generator`, metadata `custom`, declared `encryption`, and
- * public-read policy, and how many Resources sit in the collections the walk
- * carries no import function for.
+ * migration needs before it opens a Resource: the user key roster log, each
+ * migrated collection's governing log, which Resources are stored in chunks,
+ * each app collection's `generator`, metadata `custom`, declared `encryption`,
+ * and public-read policy, and how many Resources sit in the collections the
+ * migration carries no import function for.
  *
  * The survey buffers only those small documents. The Resources themselves are
  * read in a later pass per collection, one at a time, so a whole collection is
- * never in memory even though the archive is walked more than once.
+ * never in memory even though the archive is read more than once.
  */
 import {
   KEY_MAP_COLLECTION,
@@ -69,26 +69,26 @@ export interface ArchiveSurvey {
   /** the migrated standard collections the archive carries a directory for */
   present: Set<string>
   /**
-   * the app collections the walk migrates, by id in sorted order; empty when
-   * it migrates none
+   * the app collections the migration migrates, by id in sorted order; empty
+   * when it migrates none
    */
   appCollections: Map<string, AppCollectionSurvey>
-  /** the Resource count of each collection the walk reads, by id */
-  walkedResources: Map<string, number>
-  /** the Resource count of each collection the walk does not migrate, by id */
+  /** the Resource count of each collection the migration reads, by id */
+  readResources: Map<string, number>
+  /** the Resource count of each collection the migration does not migrate, by id */
   notMigrated: Map<string, number>
 }
 
 /**
- * Walks the archive once and gathers the survey.
+ * Reads the archive once and gathers the survey.
  *
  * @param options {object}
  * @param options.archive {ByteSource}   the account Space archive's bytes
  * @param options.migrated {ReadonlySet<string>}   the standard collection ids
- *   the walk migrates
- * @param options.migratesAppCollections {boolean}   whether the walk migrates
- *   app collections; when it does not, their Resources are counted as not
- *   migrated
+ *   the migration migrates
+ * @param options.migratesAppCollections {boolean}   whether the migration
+ *   migrates app collections; when it does not, their Resources are counted as
+ *   not migrated
  * @returns {Promise<ArchiveSurvey>}
  */
 export async function surveyArchive({
@@ -105,18 +105,18 @@ export async function surveyArchive({
     chunked: new Map(),
     present: new Set(),
     appCollections: new Map(),
-    walkedResources: new Map(),
+    readResources: new Map(),
     notMigrated: new Map()
   }
   const appCollections = new Map<string, AppCollectionSurvey>()
 
   /**
-   * Whether the walk reads this collection's Resources rather than counting
-   * them.
+   * Whether the migration reads this collection's Resources rather than
+   * counting them.
    * @param collectionId {string}
    * @returns {boolean}
    */
-  function isWalked(collectionId: string): boolean {
+  function isMigrated(collectionId: string): boolean {
     return migrated.has(collectionId) || appCollections.has(collectionId)
   }
 
@@ -141,7 +141,7 @@ export async function surveyArchive({
       !WALLET_LAYOUT_COLLECTIONS.has(collectionId) &&
       !appCollections.has(collectionId)
     ) {
-      // The walk fails closed: a collection counts as encrypted until its
+      // The migration fails closed: a collection counts as encrypted until its
       // metadata parses and declares no `encryption`.
       appCollections.set(collectionId, { encrypted: true, isPublic: false })
     }
@@ -149,7 +149,7 @@ export async function surveyArchive({
       continue
     }
     const file = classifyCollectionFile(position.fileName)
-    if (file.kind === 'collectionLog' && isWalked(collectionId)) {
+    if (file.kind === 'collectionLog' && isMigrated(collectionId)) {
       survey.collectionLogs.set(collectionId, await entry.bytes())
       continue
     }
@@ -159,9 +159,9 @@ export async function surveyArchive({
       try {
         metadata = collectionMetadataFromFile({ bytes: await entry.bytes() })
       } catch {
-        // A metadata file that does not parse carries nothing the walk hands
-        // on. It cannot show the collection is plaintext, so the collection
-        // stays encrypted.
+        // A metadata file that does not parse carries nothing the migration
+        // hands on. It cannot show the collection is plaintext, so the
+        // collection stays encrypted.
         continue
       }
       const generator = collectionGeneratorFromMetadata(metadata)
@@ -198,8 +198,8 @@ export async function surveyArchive({
       survey.rosterLog = await entry.bytes()
       continue
     }
-    const counts = isWalked(collectionId)
-      ? survey.walkedResources
+    const counts = isMigrated(collectionId)
+      ? survey.readResources
       : survey.notMigrated
     counts.set(collectionId, (counts.get(collectionId) ?? 0) + 1)
   }

@@ -2,22 +2,22 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The sink port: the one wallet-specific seam of the migration walk. The walk
+ * The sink port: the one wallet-specific seam of the migration. The migration
  * decrypts a Resource and hands it to the sink method of the collection it came
  * from; the sink writes it into the host's own stores and says what happened.
  * The package knows no wallet data types, so the plaintext Resource travels as
  * opaque JSON, or as opaque bytes where it is not JSON.
  *
- * The walk order and the collection-to-method mapping live here too, since
+ * The migration order and the collection-to-method mapping live here too, since
  * they are one decision: which collections migrate, in which order, through
  * which method. Every collection id is imported from the package that owns it
  * -- `@interop/wallet-core/space` for the wallet's own collections,
  * `@interop/social-core` for the contacts pair -- so a rename upstream reaches
- * the walk rather than drifting past a local copy.
+ * the migration rather than drifting past a local copy.
  *
- * Beside the four standard collections, the walk carries app collections: the
- * collections outside the wallet Space's own layout, which a connected app had
- * the wallet provision. The sink opts into them through its optional
+ * Beside the four standard collections, the migration carries app collections:
+ * the collections outside the wallet Space's own layout, which a connected app
+ * had the wallet provision. The sink opts into them through its optional
  * `appCollections` member.
  */
 import {
@@ -65,7 +65,7 @@ export type AppCollectionResource = {
  * One import function per migrated standard collection. Each takes one
  * decrypted Resource, parsed as `json`, and reports its outcome. A method that
  * throws is a `failed` Resource whose cause name the report keeps -- except a
- * throw named `QuotaExceededError`, which stops the whole walk.
+ * throw named `QuotaExceededError`, which stops the whole migration.
  *
  * `appCollections` is optional. A sink that carries it migrates app collections
  * too. `ensureCollection` is called once per app collection, before its first
@@ -83,13 +83,13 @@ export type AppCollectionResource = {
  * archived. It is absent for an encrypted collection, whose `custom` is sealed
  * to the old account's keys, and when the metadata carries none. A throw from
  * it stops that collection, and a throw named `QuotaExceededError` stops the
- * whole walk. `importResource` follows the same outcome and throw rules as the
- * four standard methods. An encrypted collection's Resource arrives decrypted,
- * as JSON or as bytes by what it decrypts to, a chunked one reassembled; a
- * plaintext one's arrives parsed as JSON or as raw bytes, by its content type
- * (see `AppCollectionResource`). Either way it keeps its archived `resourceId`.
- * A sink without the member leaves every app collection's Resources counted in
- * `notMigrated`.
+ * whole migration. `importResource` follows the same outcome and throw rules as
+ * the four standard methods. An encrypted collection's Resource arrives
+ * decrypted, as JSON or as bytes by what it decrypts to, a chunked one
+ * reassembled; a plaintext one's arrives parsed as JSON or as raw bytes, by its
+ * content type (see `AppCollectionResource`). Either way it keeps its archived
+ * `resourceId`. A sink without the member leaves every app collection's
+ * Resources counted in `notMigrated`.
  */
 export interface MigrationSink {
   importCredential(options: {
@@ -132,13 +132,13 @@ export interface MigrationSink {
 export type MigrationSinkMethod = Exclude<keyof MigrationSink, 'appCollections'>
 
 /**
- * The migrated standard collections in walk order: contacts before their
+ * The migrated standard collections in migration order: contacts before their
  * history (so a revision's head is already in place), then credentials, then
- * activity last -- the host writes its own import activity row after the walk,
- * and running activity last keeps the counts it carries final. The app
- * collections walk between credentials and activity, by id.
+ * activity last -- the host writes its own import activity row after the
+ * migration, and running activity last keeps the counts it carries final. The
+ * app collections go between credentials and activity, by id.
  */
-export const MIGRATION_WALK_ORDER: ReadonlyArray<{
+export const MIGRATION_ORDER: ReadonlyArray<{
   collectionId: string
   method: MigrationSinkMethod
 }> = [
@@ -164,9 +164,9 @@ export const MIGRATION_WALK_ORDER: ReadonlyArray<{
 export const MAX_CONSECUTIVE_FAILURES = 10
 
 /**
- * The error name a sink throw must carry to stop the whole walk rather than
- * fail one Resource: was-client's 507, a wall that every later Resource would
- * hit too. Matched by name, never by `instanceof`, since the error is minted in
- * another package.
+ * The error name a sink throw must carry to stop the whole migration rather
+ * than fail one Resource: was-client's 507, a wall that every later Resource
+ * would hit too. Matched by name, never by `instanceof`, since the error is
+ * minted in another package.
  */
-export const WALK_STOPPING_ERROR_NAME = 'QuotaExceededError'
+export const MIGRATION_STOPPING_ERROR_NAME = 'QuotaExceededError'

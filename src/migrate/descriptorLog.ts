@@ -3,13 +3,13 @@
  */
 /**
  * Reading an encryption descriptor out of an archived governing history log.
- * Two logs feed the walk and both are read the same way: the account's user
- * key roster (`key-map/user-key.jsonl`, an ordinary Resource whose body is the
- * log's JSON Lines) and each Collection's own `meta/log` (archived as
+ * Two logs feed the migration and both are read the same way: the account's
+ * user key roster (`key-map/user-key.jsonl`, an ordinary Resource whose body is
+ * the log's JSON Lines) and each Collection's own `meta/log` (archived as
  * `.collectionlog.<id>.json`, the server's stored record wrapping that body
  * beside its validator).
  *
- * The read is unverified on purpose: the walk checks no proof and no hash
+ * The read is unverified on purpose: the migration checks no proof and no hash
  * chain, because a backup bundle carries no controller view to verify one
  * against. It parses the log's format, takes the head entry's `state`, and
  * refuses a state that is not an epoch configuration rather than handing it on

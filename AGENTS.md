@@ -140,22 +140,22 @@ Rules:
 This package owns two contracts: the outer bundle (its manifest, role anchors
 and packed backup credential) and the migration sink port with its report. Every
 repo that implements or consumes either is listed below with the modules that
-speak it. **The maintenance rule: a change to either contract's shape is a walk
-of this table** -- for each row, resolve the impact as shipped (naming what
-landed, including that row's ARCHITECTURE/AGENTS docs) or explicitly waived
-(`unaffected: <repo> (<why>)`). A breaking change is named as such in each
-implementing package's CHANGELOG.
+speak it. **The maintenance rule: a change to either contract's shape is a pass
+over every row of this table** -- for each row, resolve the impact as shipped
+(naming what landed, including that row's ARCHITECTURE/AGENTS docs) or
+explicitly waived (`unaffected: <repo> (<why>)`). A breaking change is named as
+such in each implementing package's CHANGELOG.
 
 The per-Space archive layout each bundle carries is a separate contract, owned
 by `@interop/space-archive`. See that package's AGENTS.md for its own parties
 table.
 
-| Repo                         | Modules speaking the contract                                                                                                                                                                                | Item reference |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- |
-| portable-wallet-profile-spec | The normative bundle text: the manifest, role anchors and packed backup credential. The spec governs; this codec follows it.                                                                                 | PWP-2          |
-| wallet-backup (this repo)    | `src/bundle/` the outer bundle codec; `src/migrate/` the walk, the sink port and the report.                                                                                                                 |                |
-| freewallet                   | The sink over `StorageManager`'s import functions (one per migrated collection), and the Settings entry point that runs the walk and writes the import activity row from the report's `manifest` and counts. |                |
-| dcw (private)                | Its own sink over the mobile wallet's stores, against the same port and report shape.                                                                                                                        |                |
+| Repo                         | Modules speaking the contract                                                                                                                                                                                     | Item reference |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| portable-wallet-profile-spec | The normative bundle text: the manifest, role anchors and packed backup credential. The spec governs; this codec follows it.                                                                                      | PWP-2          |
+| wallet-backup (this repo)    | `src/bundle/` the outer bundle codec; `src/migrate/` the migration, the sink port and the report.                                                                                                                 |                |
+| freewallet                   | The sink over `StorageManager`'s import functions (one per migrated collection), and the Settings entry point that runs the migration and writes the import activity row from the report's `manifest` and counts. |                |
+| dcw (private)                | Its own sink over the mobile wallet's stores, against the same port and report shape.                                                                                                                             |                |
 
 ## Decision Records
 

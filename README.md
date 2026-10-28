@@ -3,7 +3,7 @@
 [![Node.js CI](https://github.com/interop-alliance/wallet-backup/workflows/CI/badge.svg)](https://github.com/interop-alliance/wallet-backup/actions?query=workflow%3A%22CI%22)
 [![NPM Version](https://img.shields.io/npm/v/@interop/wallet-backup.svg)](https://npm.im/@interop/wallet-backup)
 
-> Backup bundle codec and content-migration walk for portable wallets.
+> Backup bundle codec and content migration for portable wallets.
 
 Reads and writes the backup bundle a portable wallet exports: the outer tar with
 its manifest and packed backup credential, and the per-Space export archives it
@@ -47,8 +47,8 @@ pnpm install @interop/wallet-backup @interop/wallet-core @interop/was-client
 
 `@interop/wallet-core` and `@interop/was-client` are peer dependencies. The host
 wallet already depends on both, and this package uses the host's copy, so the
-bundle codec and the walk share the wallet's own constants, KDF parameters and
-ciphers.
+bundle codec and the migration share the wallet's own constants, KDF parameters
+and ciphers.
 
 ### Development
 
@@ -131,12 +131,13 @@ report.manifest // the bundle manifest minus its `contents`
 ```
 
 Each import function returns `accepted`, `skipped`, `conflicting` or `failed`. A
-method that throws counts as a failed Resource and the walk carries on; ten
+method that throws counts as a failed Resource and the migration carries on; ten
 consecutive failures end that collection (its report entry names the cause under
-`stoppedBy`) and the walk moves to the next. A throw named `QuotaExceededError`
-ends the whole walk, and `report.stoppedAt` names where.
+`stoppedBy`) and the migration moves to the next. A throw named
+`QuotaExceededError` ends the whole migration, and `report.stoppedAt` names
+where.
 
-The walk order is contacts, contact history, credentials, then the app
+The migration order is contacts, contact history, credentials, then the app
 collections by id, then activity last. `ensureCollection` runs once per app
 collection before its first Resource is opened. `encrypted` is false only when
 the archived metadata file exists, parses, and declares no `encryption`, and the
@@ -163,8 +164,8 @@ entries are sound. When none survive, the collection stops under
 for a missing log, counts its Resources as `unopenable` under the stopping
 cause. A Resource whose own epoch entry fails that check is counted under
 `IntegrityError` too, and no older generation is tried for it. A throw named
-`QuotaExceededError` ends the whole walk. `importResource` follows the rules
-above. It receives `{ collectionId, resourceId, contentType }` plus the
+`QuotaExceededError` ends the whole migration. `importResource` follows the
+rules above. It receives `{ collectionId, resourceId, contentType }` plus the
 Resource's payload. An encrypted collection's Resource arrives decrypted. It is
 `json`, under `application/json`, when it decrypts to JSON. It is `bytes`, under
 its sealed content type (`application/octet-stream` when none was sealed), when
@@ -246,8 +247,8 @@ const bundle = await readBundle(bytes)
 for await (const space of bundle.spaces) {
   // one Space archive at a time
 }
-// Walking `spaces` to its end, or breaking out of the loop, releases the
-// source. A caller that never walks it calls `bundle.close()` instead.
+// Reading `spaces` to its end, or breaking out of the loop, releases the
+// source. A caller that never iterates it calls `bundle.close()` instead.
 ```
 
 ## Contribute

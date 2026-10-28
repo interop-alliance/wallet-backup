@@ -1,9 +1,13 @@
 # @interop/wallet-backup Changelog
 
-## 0.6.2 - TBD
+## 0.7.0 - TBD
 
 ### Changed
 
+- Breaking: `MIGRATION_WALK_ORDER` is renamed `MIGRATION_ORDER` and
+  `WALK_STOPPING_ERROR_NAME` is renamed `MIGRATION_STOPPING_ERROR_NAME`. Their
+  values are unchanged. A run of `migrateBundle` is a migration; the readers'
+  lazy entry iteration is the entry cursor, space-archive's term (WBU-11).
 - A descriptor recipient entry that names a recovered generation but fails its
   AES-KW check (was-client's `IntegrityError`) is a tamper signal, not a
   generation the migration skips as a non-recipient. In the current epoch the

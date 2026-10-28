@@ -2,10 +2,10 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * `@interop/wallet-backup`: the backup bundle codec and content-migration walk
- * for portable wallets. One door onto two parts -- the outer bundle
- * (`./bundle`) and the walk that reads content back out of one (`./migrate`).
- * The per-Space export archive a bundle carries is `@interop/space-archive`'s;
+ * `@interop/wallet-backup`: the backup bundle codec and content migration for
+ * portable wallets. One door onto two parts -- the outer bundle (`./bundle`)
+ * and the migration that reads content back out of one (`./migrate`). The
+ * per-Space export archive a bundle carries is `@interop/space-archive`'s;
  * consumers that need its codec import that package directly rather than
  * through here.
  *

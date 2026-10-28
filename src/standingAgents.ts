@@ -4,13 +4,13 @@
 /**
  * One unlock secret to the standing client agents it derives, with the
  * derivation's byproducts wiped. Both the packed backup credential (sealing
- * and opening under an export passphrase) and the migration walk (an unlock
+ * and opening under an export passphrase) and the migration (an unlock
  * passphrase, the unpacked credential secret) run the same two wallet-core
  * steps, an unlock seed derivation and the standing client derivation over
  * that seed, and owe the same wipe: the client seed and binding MAC key the
  * standing client derivation hands back beside its agents are zeroed here,
  * so no caller has to remember them. The unlock seed is handed back with the
- * agents, since one caller keeps it for the walk to wipe at the end; every
+ * agents, since one caller keeps it for the migration to wipe at the end; every
  * other caller zeroes it as soon as this returns.
  */
 import { deriveUnlockSeed } from '@interop/wallet-core/keyring/kdf'

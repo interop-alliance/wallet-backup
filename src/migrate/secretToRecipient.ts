@@ -10,10 +10,10 @@
  * export passphrase) is unpacked to its 32 secret bytes, which run through
  * the backup credential's HKDF derivation to its standing client identity.
  *
- * Every derivation here belongs to `@interop/wallet-core`; this module
- * chooses between them and hands back the key-agreement key the roster lookup
- * matches on, plus the passphrase's intermediate seed so the walk can wipe it
- * when it ends.
+ * Every derivation here belongs to `@interop/wallet-core`; this module chooses
+ * between them and hands back the key-agreement key the roster lookup matches
+ * on, plus the passphrase's intermediate seed so the migration can wipe it when
+ * it ends.
  */
 import {
   BACKUP_CREDENTIAL_KDF,
@@ -46,7 +46,7 @@ export type RecipientKeyAgreementKey = StandingAgents['keyAgreementKey']
 /**
  * The derived recipient: the key-agreement key whose id the roster's wraps are
  * addressed to, and the unlock seed behind it where one was derived, held only
- * so the walk can zero it at the end.
+ * so the migration can zero it at the end.
  */
 export interface MigrationRecipient {
   keyAgreementKey: RecipientKeyAgreementKey
@@ -91,7 +91,7 @@ async function backupCredentialFromBundle({
  * The packed credential's secret bytes and the unlock seed derived from them
  * are wiped before this returns: the key-agreement key is derived from them
  * already, and nothing past this point needs either. Only the passphrase's
- * unlock seed is handed on, for the walk to wipe when it ends.
+ * unlock seed is handed on, for the migration to wipe when it ends.
  *
  * @param options {object}
  * @param options.secret {MigrationSecret}

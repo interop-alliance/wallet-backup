@@ -2,11 +2,11 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The migration walk, over fixture bundles built in this process: the happy
- * path per standard collection, the refusals that come before any Resource is
- * written, the per-Resource and per-collection failure rules, and the two
- * stops. Every test installs a `fetch` that throws, so a walk that reached the
- * network would fail loudly rather than quietly work.
+ * The migration, over fixture bundles built in this process: the happy path per
+ * standard collection, the refusals that come before any Resource is written,
+ * the per-Resource and per-collection failure rules, and the two stops. Every
+ * test installs a `fetch` that throws, so a migration that reached the network
+ * would fail loudly rather than quietly work.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -61,7 +61,7 @@ import type {
   MigrationSinkMethod,
   SinkOutcome
 } from '../../src/index.js'
-import { walkCollection } from '../../src/migrate/collectionWalk.js'
+import { migrateCollection } from '../../src/migrate/collectionPass.js'
 import { indexSchemaFromCustom } from '../../src/migrate/generations.js'
 import { CollectionTally } from '../../src/migrate/report.js'
 import {
@@ -567,7 +567,7 @@ describe('migrateBundle', () => {
 
   beforeAll(() => {
     globalThis.fetch = (() => {
-      throw new Error('The migration walk issued an HTTP request.')
+      throw new Error('The migration issued an HTTP request.')
     }) as typeof globalThis.fetch
   })
 
@@ -1248,7 +1248,7 @@ describe('migrateBundle', () => {
     expect(report.stoppedAt).toBeUndefined()
   })
 
-  it('stops the whole walk on a quota refusal', async () => {
+  it('stops the whole migration on a quota refusal', async () => {
     const [generation] = await mintGenerations(1)
     const { code, recipient } = await recoverySecret()
     const bundle = await fixtureBundle({
@@ -1914,8 +1914,8 @@ describe('migrateBundle', () => {
       const bundle = await fixtureBundle({
         generations,
         recipients: [recipient],
-        // app-a's Resource is the archive's last entry, so walkCollection finds
-        // no entry after it to check the signal on.
+        // app-a's Resource is the archive's last entry, so migrateCollection
+        // finds no entry after it to check the signal on.
         collections: [
           {
             collectionId: 'app-b',
@@ -2117,7 +2117,7 @@ describe('migrateBundle', () => {
       expect(report.collections['no-custom']!.accepted).toBe(1)
     })
 
-    it('walks the app collections by id after credentials, with activity last', async () => {
+    it('migrates the app collections by id after credentials, with activity last', async () => {
       const { sink, report } = await runApp({
         collections: ([generation]) => [
           ...standardCollections(generation!),
@@ -2134,7 +2134,7 @@ describe('migrateBundle', () => {
           }
         ]
       })
-      const walkOrder = [
+      const migrationOrder = [
         CONTACTS_COLLECTION,
         CONTACTS_HISTORY_COLLECTION,
         PRIVATE_CREDENTIALS_COLLECTION,
@@ -2142,8 +2142,8 @@ describe('migrateBundle', () => {
         'zeta',
         WALLET_ACTIVITY_COLLECTION
       ]
-      expect(sink.calls.map(call => call.collectionId)).toEqual(walkOrder)
-      expect(Object.keys(report.collections)).toEqual(walkOrder)
+      expect(sink.calls.map(call => call.collectionId)).toEqual(migrationOrder)
+      expect(Object.keys(report.collections)).toEqual(migrationOrder)
     })
 
     it('counts app collections as not migrated when the sink carries no appCollections', async () => {
@@ -2928,25 +2928,25 @@ describe('migrateBundle', () => {
           }
         }
         const importResource = vi.fn(async () => 'accepted' as const)
-        const walkTally = new CollectionTally()
+        const passTally = new CollectionTally()
         await expect(
-          walkCollection({
+          migrateCollection({
             archive,
             collectionId: 'photos',
             importResource,
             ciphers: [cipher],
             chunked: new Set(['zChunked']),
             openChunked: true,
-            tally: walkTally,
+            tally: passTally,
             signal: controller.signal
           })
         ).rejects.toBe(reason)
         expect(importResource).not.toHaveBeenCalled()
-        expect(walkTally.toReport()).toEqual(tally())
+        expect(passTally.toReport()).toEqual(tally())
       })
     })
 
-    it('stops the whole walk on a quota refusal from ensureCollection', async () => {
+    it('stops the whole migration on a quota refusal from ensureCollection', async () => {
       const { report } = await runApp({
         sink: appRecordingSink({
           ensure: () => {

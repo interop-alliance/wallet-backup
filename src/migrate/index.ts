@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The content-migration walk: `migrateBundle` drives it, the host supplies a
- * `MigrationSink`, and the walk hands back a `MigrationReport`. Nothing here
- * issues a request, and no key material outlives the call.
+ * The content migration: `migrateBundle` drives it, the host supplies a
+ * `MigrationSink`, and the migration hands back a `MigrationReport`. Nothing
+ * here issues a request, and no key material outlives the call.
  */
 export { migrateBundle } from './migrateBundle.js'
 
@@ -17,8 +17,8 @@ export type {
 
 export {
   MAX_CONSECUTIVE_FAILURES,
-  MIGRATION_WALK_ORDER,
-  WALK_STOPPING_ERROR_NAME
+  MIGRATION_ORDER,
+  MIGRATION_STOPPING_ERROR_NAME
 } from './sink.js'
 export type {
   AppCollectionResource,

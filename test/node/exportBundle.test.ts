@@ -181,9 +181,9 @@ describe('exportBundle', () => {
       CREDENTIAL_SECRET
     )
 
-    const walked: string[] = []
+    const visited: string[] = []
     for await (const space of bundle.spaces) {
-      walked.push(space.spaceId)
+      visited.push(space.spaceId)
       const archive = await space.bytes()
       expect(
         Buffer.from(archive).equals(
@@ -191,7 +191,7 @@ describe('exportBundle', () => {
         )
       ).toBe(true)
     }
-    expect(walked).toEqual([ACCOUNT_SPACE_ID, UNLOCK_SPACE_ID])
+    expect(visited).toEqual([ACCOUNT_SPACE_ID, UNLOCK_SPACE_ID])
 
     expect(stages).toEqual([
       { stage: 'establishing-credential' },
@@ -327,13 +327,13 @@ describe('exportBundle', () => {
         yield* chunks
       })()
     )
-    const walked: string[] = []
+    const visited: string[] = []
     for await (const space of bundle.spaces) {
-      walked.push(space.spaceId)
+      visited.push(space.spaceId)
       const bytes = await space.bytes()
       expect(Buffer.from(bytes).equals(Buffer.from(archive))).toBe(true)
     }
-    expect(walked).toEqual(spaceIds)
+    expect(visited).toEqual(spaceIds)
     expect(started).toEqual(spaceIds)
   })
 

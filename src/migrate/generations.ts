@@ -7,8 +7,8 @@
  *
  * Every roster epoch is one generation of the account's user key, escrow-
  * wrapped to every enrolled recipient, so one old secret recovers the whole
- * history rather than the epoch it was enrolled at. The walk needs them all:
- * a cascade that tore halfway leaves the newest generation opening some
+ * history rather than the epoch it was enrolled at. The migration needs them
+ * all: a cascade that tore halfway leaves the newest generation opening some
  * collections' epochs and an older one the rest, and a Resource is opened by
  * whichever generation holds its epoch.
  *
@@ -27,9 +27,9 @@ import { BundleRecipientMissingError } from '../errors.js'
 import type { RecipientKeyAgreementKey } from './secretToRecipient.js'
 
 /**
- * One user key generation: the did:key naming it and its raw secret. The
- * secret is live key material for as long as the walk holds it, and is zeroed
- * when the walk ends.
+ * One user key generation: the did:key naming it and its raw secret. The secret
+ * is live key material for as long as the migration holds it, and is zeroed
+ * when the migration ends.
  */
 export type UserKeyGeneration = Awaited<
   ReturnType<typeof unwrapUserKeyGenerations>
@@ -37,10 +37,10 @@ export type UserKeyGeneration = Awaited<
 
 /**
  * Recovers every user key generation the secret's recipient key holds a wrap
- * for, newest first. A secret that is a recipient of none is not a recipient
- * of this bundle at all, which is refused here -- before a single Resource is
- * decrypted, so a wrong passphrase fails the whole walk rather than emptying
- * it Resource by Resource.
+ * for, newest first. A secret that is a recipient of none is not a recipient of
+ * this bundle at all, which is refused here -- before a single Resource is
+ * decrypted, so a wrong passphrase fails the whole migration rather than
+ * emptying it Resource by Resource.
  *
  * @param options {object}
  * @param options.descriptor {CollectionEncryption}   the archived roster
@@ -90,9 +90,9 @@ export async function recoverGenerations({
  * @param options.collectionId {string}
  * @param options.encryption {CollectionEncryption}   the collection's
  *   descriptor, read from its archived governing log
- * @returns {Promise<{ ciphers: EdvDocCipher[]; dropped: string[] }>}   the
- *   ciphers that built, newest first, and the error name of each generation
- *   dropped for failing its key-wrap check
+ * @returns {Promise<{ ciphers: EdvDocCipher[]; dropped: Error[] }>}   the
+ *   ciphers that built, newest first, and the `IntegrityError` of each
+ *   generation dropped for failing its key-wrap check
  */
 export async function ciphersForCollection({
   generations,
@@ -102,10 +102,9 @@ export async function ciphersForCollection({
   generations: UserKeyGeneration[]
   collectionId: string
   encryption: CollectionEncryption
-}): Promise<{ ciphers: EdvDocCipher[]; dropped: string[] }> {
+}): Promise<{ ciphers: EdvDocCipher[]; dropped: Error[] }> {
   const ciphers: EdvDocCipher[] = []
-  const dropped: string[] = []
-  let firstIntegrityError: Error | undefined
+  const dropped: Error[] = []
   for (const generation of generations) {
     const { keyAgreementKey, keyResolver } = userKeyVaultKeys({
       userKey: generation
@@ -125,15 +124,14 @@ export async function ciphersForCollection({
       // drops the generation. Every other cause is a wiring fault.
       const name = (err as Error).name
       if (name === 'IntegrityError') {
-        dropped.push(name)
-        firstIntegrityError ??= err as Error
+        dropped.push(err as Error)
       } else if (name !== 'KeyUnwrapError') {
         throw err
       }
     }
   }
-  if (ciphers.length === 0 && firstIntegrityError !== undefined) {
-    throw firstIntegrityError
+  if (ciphers.length === 0 && dropped.length > 0) {
+    throw dropped[0]
   }
   return { ciphers, dropped }
 }
@@ -187,8 +185,9 @@ export async function indexSchemaFromCustom({
 }
 
 /**
- * Wipes every generation's secret in place. Called from the walk's `finally`,
- * so an abort or a refusal drops the key material as an ordinary end does.
+ * Wipes every generation's secret in place. Called from the migration's
+ * `finally`, so an abort or a refusal drops the key material as an ordinary end
+ * does.
  * @param generations {UserKeyGeneration[]}
  * @returns {void}
  */

@@ -273,9 +273,9 @@ describe('writeBundle and readBundle', () => {
       [`spaces/${UNLOCK_SPACE_ID}.tar`, BUNDLE_ROLE.unlockSpaceArchive]
     ])
 
-    const walked: string[] = []
+    const visited: string[] = []
     for await (const space of bundle.spaces) {
-      walked.push(space.spaceId)
+      visited.push(space.spaceId)
       const archive = await space.bytes()
       expect(
         Buffer.from(archive).equals(
@@ -283,7 +283,7 @@ describe('writeBundle and readBundle', () => {
         )
       ).toBe(true)
     }
-    expect(walked).toEqual([FIXTURE_SPACE_ID, UNLOCK_SPACE_ID])
+    expect(visited).toEqual([FIXTURE_SPACE_ID, UNLOCK_SPACE_ID])
   })
 
   it('hands back the account Space archive verbatim', async () => {
@@ -587,10 +587,10 @@ describe('bundle close and early release', () => {
       { name: 'trailer.txt', body: 'not a space archive' }
     ])
     const bundle = await readBundle(bytes)
-    const walked: string[] = []
+    const visited: string[] = []
     for await (const space of bundle.spaces) {
-      walked.push(space.path)
+      visited.push(space.path)
     }
-    expect(walked).toEqual(['spaces/zSpace.tar'])
+    expect(visited).toEqual(['spaces/zSpace.tar'])
   })
 })

@@ -12,7 +12,7 @@
  * the same reason: bytes that will not read back as a tar of the expected
  * shape. Along with the next two below, it is raised before any content is
  * handed to a sink -- a bundle that cannot be opened at all. The last two are
- * reported per Resource or per collection by the migration walk, which carries
+ * reported per Resource or per collection by the migration, which carries
  * on with the rest.
  */
 export { BundleInvalidError } from '@interop/space-archive'
@@ -33,7 +33,7 @@ export class AccountSpaceArchiveMissingError extends Error {
 /**
  * The secret in hand is not a recipient of the bundle's user key: unwrapping
  * the roster's generations for it yielded none. Raised before any Resource is
- * decrypted, so a wrong passphrase or recovery code fails the whole walk
+ * decrypted, so a wrong passphrase or recovery code fails the whole migration
  * rather than emptying it Resource by Resource.
  */
 export class BundleRecipientMissingError extends Error {
@@ -46,7 +46,7 @@ export class BundleRecipientMissingError extends Error {
 /**
  * A Collection's governing history log could not be read, so its encryption
  * descriptor is unknown and its Resources cannot be opened. Reported against
- * that collection and the collection is skipped; the walk continues.
+ * that collection and the collection is skipped; the migration continues.
  */
 export class CollectionLogUnreadableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -59,7 +59,7 @@ export class CollectionLogUnreadableError extends Error {
  * A Resource is stored in chunks outside an encrypted app collection: in a
  * plaintext app collection, where no chunk framing is defined, or in a
  * standard collection, whose import functions take parsed JSON. The migration
- * walk does not open it. Reported as that one Resource's cause; the rest of
+ * does not open it. Reported as that one Resource's cause; the rest of
  * the collection is migrated. A chunked Resource in an encrypted app
  * collection is reassembled instead.
  */

@@ -1,6 +1,6 @@
 {
   "name": "@interop/wallet-backup",
-  "description": "Backup bundle codec and content-migration walk for portable wallets",
+  "description": "Backup bundle codec and content migration for portable wallets",
   "version": "0.6.1",
   "type": "module",
   "scripts": {
@@ -38,8 +38,8 @@
   "sideEffects": false,
   "dependencies": {
     "@interop/social-core": "^0.8.1",
-    "@interop/space-archive": "^0.8.3",
-    "@interop/storage-core": "^0.40.0",
+    "@interop/space-archive": "^0.9.0",
+    "@interop/storage-core": "^0.41.0",
     "@interop/vh-resource-log": "^0.9.0",
     "@scure/base": "^2.4.0",
     "events": "^3.3.0",
@@ -48,8 +48,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/wallet-core": "^0.107.1",
-    "@interop/was-client": "link:../was-client",
+    "@interop/wallet-core": "^0.108.0",
+    "@interop/was-client": "^0.99.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",

@@ -8,8 +8,8 @@
  * same numbers.
  *
  * The TypeScript shape is not wire. What the host writes into an activity row
- * is the host's contract; this is the in-house interface between the walk and
- * the host.
+ * is the host's contract; this is the in-house interface between the migration
+ * and the host.
  */
 import type { BundleManifestSummary } from '../bundle/manifest.js'
 import type { SinkOutcome } from './sink.js'
@@ -18,11 +18,12 @@ import type { SinkOutcome } from './sink.js'
  * One collection's counts. `unopenable` Resources never reached the sink: no
  * held user key generation opened them, a chunked Resource could not be
  * reassembled or is not opened where it sits, or the collection was stopped
- * before its first Resource (its `stoppedBy` then names the cause). `unopenableCauses` names why, by error name, with the number of
- * Resources each name accounts for. `stoppedBy` is present only when a run of
- * consecutive failures ended the collection, carrying the last cause's name (or
- * the outcome word `failed` when the sink reported failure without throwing),
- * or when the collection was stopped before its first Resource.
+ * before its first Resource (its `stoppedBy` then names the cause).
+ * `unopenableCauses` names why, by error name, with the number of Resources
+ * each name accounts for. `stoppedBy` is present only when a run of consecutive
+ * failures ended the collection, carrying the last cause's name (or the outcome
+ * word `failed` when the sink reported failure without throwing), or when the
+ * collection was stopped before its first Resource.
  *
  * Two members carry a descriptor fault the collection migrated in spite of.
  * `generationCauses` names, by error name, the recovered generations dropped
@@ -46,17 +47,24 @@ export interface MigrationCollectionReport {
 }
 
 /**
- * What one walk did. A collection the walk never entered is absent from
- * `collections`, so a present entry means the walk got that far. `stoppedAt` is
- * present only when a quota refusal stopped the whole walk. `notMigrated`
- * counts the Resources of every collection the walk carries no import function
- * for, by collection id, and no sink method saw any of them.
+ * What one migration did. A collection the migration never entered is absent
+ * from `collections`, so a present entry means the migration got that far.
+ * `stoppedAt` is present only when a quota refusal stopped the whole migration.
+ * `notMigrated` counts the Resources of every collection the migration carries
+ * no import function for, by collection id, and no sink method saw any of them.
  */
 export interface MigrationReport {
   manifest: BundleManifestSummary
   collections: Record<string, MigrationCollectionReport>
   stoppedAt?: { collectionId: string; cause: string }
   notMigrated: Record<string, number>
+}
+
+/**
+ * Adds one to the count held under `key`, starting it at one.
+ */
+function increment(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1)
 }
 
 /**
@@ -71,10 +79,6 @@ export interface MigrationReport {
  * @param counts {Map<string, TValue>}
  * @returns {Record<string, TValue>}
  */
-function increment(counts: Map<string, number>, key: string): void {
-  counts.set(key, (counts.get(key) ?? 0) + 1)
-}
-
 export function keyedRecord<TValue>(
   counts: Map<string, TValue>
 ): Record<string, TValue> {
@@ -91,7 +95,7 @@ export function keyedRecord<TValue>(
 }
 
 /**
- * The per-collection tally the walk fills in as it goes.
+ * The per-collection tally the migration fills in as it goes.
  */
 export class CollectionTally {
   accepted = 0

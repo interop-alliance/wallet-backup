@@ -11,7 +11,8 @@
  * Nothing here talks to a server. The roster and the collection descriptors
  * are assembled from was-client's epoch primitives directly, so a test can
  * produce states the live ceremonies would not -- a torn cascade, a generation
- * whose wrap went missing -- which is exactly what the walk has to survive.
+ * whose wrap went missing -- which is exactly what the migration has to
+ * survive.
  */
 import {
   createEdvEncryptOnlyDocCipher,

@@ -537,7 +537,7 @@ WBU-6's was-client write-by-id path.
     `buildGenerationCiphers` names) keeps rethrowing, and the walk's existing
     per-collection catch reports it as `stoppedBy: 'IntegrityError'`; three
     tests in `test/node/migrate.test.ts`; JSDoc on all three sites; README,
-    ARCHITECTURE invariant 10, CHANGELOG 0.6.2.
+    ARCHITECTURE invariant 10, CHANGELOG 0.7.0.
   - freewallet: the migration report's cause-to-copy map has no `IntegrityError`
     arm; filed there as FW-692 (2026-10-27). Resolved as tracked there: the arm
     lands with FW-692, not with this item.
@@ -590,7 +590,7 @@ discovered-from: was-client's reclassification of the failure (2026-10-27).
     the was-client peer range to the version that does, and note it in
     CHANGELOG. Shipped 2026-10-27: the peer range already names 0.99.1 (WBU-9),
     the migration test over three Resources counts derivations per generation,
-    CHANGELOG 0.6.2.
+    CHANGELOG 0.7.0.
 - acceptance:
   - [x] was-client caches a lazy epoch unwrap that raised `IntegrityError`, so
         the second decrypt under that epoch raises it without a second unwrap.
@@ -608,3 +608,46 @@ bookkeeping, so the memo belongs there rather than in this package, which
 deliberately does not read the epoch id out of an envelope.
 
 discovered-from: WBU-9 (code review of its change set, 2026-10-27).
+
+### WBU-11: Settle the term "walk" in the glossary and the prose that uses it
+
+- status: done (2026-10-27)
+- priority: low
+- labels: docs, glossary
+- touches:
+  - wallet-backup -- shipped 2026-10-27: "walk" retired. The readers' iteration
+    is the entry cursor (new Glossary entry, space-archive's term); "Migration"
+    lists walk under Avoid; "Collection pass" added. ARCHITECTURE.md (layer map,
+    invariants 3, 7, 8 and 10, ownership heuristics, Glossary), README.md,
+    AGENTS.md's parties table and maintenance rule, package.json's description,
+    and the `src/` and test prose say "migration" for the run. `walkCollection`
+    is `migrateCollection` in `collectionPass.ts`; the exports
+    `MIGRATION_WALK_ORDER` and `WALK_STOPPING_ERROR_NAME` are `MIGRATION_ORDER`
+    and `MIGRATION_STOPPING_ERROR_NAME` (breaking, in the CHANGELOG).
+    `src/bundle/readBundle.ts` says entry cursor.
+    `decisions/0001-the-walk-lives-here-behind-a-push-sink.md` keeps its file
+    name and title; a record is not rewritten.
+- acceptance:
+  - [x] The Glossary names one canonical term for one run of `migrateBundle`
+        (the existing "Migration" entry, or a replacement) and lists "walk"
+        under its `Avoid:` synonyms, or defines "walk" for exactly one of its
+        two current senses with the other given its own term.
+  - [x] The tar entry iteration the readers expose has its own glossary term,
+        distinct from the migration run.
+  - [x] ARCHITECTURE.md, README.md and the `src/` prose use the settled terms
+        throughout; a grep for "walk" finds only the senses the glossary allows.
+  - [x] Code identifiers that carry the retired sense are renamed in the same
+        change set, with a CHANGELOG entry if any is exported.
+
+Context: "walk" is used throughout ARCHITECTURE.md, README.md and the migration
+source for two different things. One is the whole migration run: "the walk
+refuses early or counts", "the walk issues no request", "what a finished walk
+hands back". The other is the lazy tar entry iteration the bundle and archive
+readers expose: "walk lazily", "the walks are one-shot", "the tar-walk helpers".
+The Glossary defines "Migration" for the first sense and nothing for the second,
+and never mentions "walk" at all, so the term is neither canonical nor banned,
+and a reader cannot tell from the word which of the two is meant. The ambiguity
+was called out in the review of the WBU-9 change set; its new prose says
+"migration" and the rest of the repo was left as it was.
+
+discovered-from: WBU-9 (2026-10-27).

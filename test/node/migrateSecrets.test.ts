@@ -4,13 +4,13 @@
 /**
  * The migration secrets that derive an unlock seed -- an unlock passphrase,
  * and a packed backup credential in the clear or sealed to an export
- * passphrase -- and the wipe the walk owes its caller when it ends.
+ * passphrase -- and the wipe the migration owes its caller when it ends.
  *
- * The wallet-core subpaths the walk derives through, and the backup credential
- * unpack, are wrapped here rather than replaced: the real functions run, and
- * the wrapper keeps a reference to the bytes they produced so the test can
- * assert the walk zeroed them. A spy is the only way to see that from
- * outside, since the walk deliberately hands no key material back.
+ * The wallet-core subpaths the migration derives through, and the backup
+ * credential unpack, are wrapped here rather than replaced: the real functions
+ * run, and the wrapper keeps a reference to the bytes they produced so the test
+ * can assert the migration zeroed them. A spy is the only way to see that from
+ * outside, since the migration deliberately hands no key material back.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -44,8 +44,9 @@ import {
 } from '../fixtures/migration/bundle.js'
 
 /**
- * The generations the walk recovered, captured as `unwrapUserKeyGenerations`
- * hands them back, so the test can read their secrets after the walk.
+ * The generations the migration recovered, captured as
+ * `unwrapUserKeyGenerations` hands them back, so the test can read their
+ * secrets after the migration.
  */
 const recovered: Array<{ id: string; secret: Uint8Array }> = []
 
@@ -278,7 +279,7 @@ describe('migrateBundle secrets', () => {
 
   beforeAll(() => {
     globalThis.fetch = (() => {
-      throw new Error('The migration walk issued an HTTP request.')
+      throw new Error('The migration issued an HTTP request.')
     }) as typeof globalThis.fetch
   })
 
@@ -354,7 +355,7 @@ describe('migrateBundle secrets', () => {
       files
     })
     expect(recipient.keyAgreementKey.id).toBe(client.agents.keyAgreementKey.id)
-    // The credential's seed is wiped here rather than handed to the walk.
+    // The credential's seed is wiped here rather than handed to the migration.
     expect(recipient.unlockSeed).toBeUndefined()
     // So are the unpacked secret bytes and the standing client's byproducts.
     expect(credentialSecrets).toHaveLength(1)
@@ -372,7 +373,7 @@ describe('migrateBundle secrets', () => {
     ).rejects.toMatchObject({ name: 'BundleInvalidError' })
   })
 
-  it('zeroes every generation secret and the derived seed when the walk ends', async () => {
+  it('zeroes every generation secret and the derived seed when the migration ends', async () => {
     recovered.length = 0
     seeds.length = 0
     const unlockSeed = await deriveUnlockSeed({
@@ -383,8 +384,8 @@ describe('migrateBundle secrets', () => {
     const bundle = await oneCollectionBundle({
       recipients: [recipientFor(client.agents.keyAgreementKey)]
     })
-    // The seed derived to build the fixture is not the walk's; only the ones
-    // the walk derives after this point are asserted on.
+    // The seed derived to build the fixture is not the migration's; only the
+    // ones the migration derives after this point are asserted on.
     seeds.length = 0
     clientSecrets.length = 0
     await migrateBundle({

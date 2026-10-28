@@ -2,29 +2,29 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The content-migration walk: a backup bundle and one old secret in, plaintext
+ * The content migration: a backup bundle and one old secret in, plaintext
  * Resources pushed at a host's sink, and a report of what happened out.
  *
- * The walk issues no request. Everything it needs is in the bundle -- the user
- * key roster, each collection's encryption descriptor, every envelope -- so a
- * migration runs from the file alone, against any server, with the old account
- * long gone. Nothing in the path names an account DID, which is what makes a
- * bundle portable between accounts at all.
+ * The migration issues no request. Everything it needs is in the bundle -- the
+ * user key roster, each collection's encryption descriptor, every envelope --
+ * so a migration runs from the file alone, against any server, with the old
+ * account long gone. Nothing in the path names an account DID, which is what
+ * makes a bundle portable between accounts at all.
  *
  * It refuses early or not at all. A bundle that cannot be opened, an archive
  * with no account Space, or a secret that is a recipient of nothing fails
  * before a single Resource reaches the sink. Past that point every failure is a
  * count in the report: a collection whose log will not read, a Resource no held
  * generation opens, a write the sink could not land. The one exception is the
- * server's quota refusal, which ends the walk, since every later Resource would
- * hit the same wall.
+ * server's quota refusal, which ends the migration, since every later Resource
+ * would hit the same wall.
  *
- * Key material lives no longer than the walk, as far as it can be scrubbed.
- * The `finally` below zeroes every generation's raw secret and the derived
- * seed whether the walk ended, was aborted, or threw. The key objects built
- * from them carry their private half as an immutable string, which nothing can
- * overwrite in place; those are dropped here and reclaimed by garbage
- * collection rather than wiped.
+ * Key material lives no longer than the migration, as far as it can be
+ * scrubbed. The `finally` below zeroes every generation's raw secret and the
+ * derived seed whether the migration ended, was aborted, or threw. The key
+ * objects built from them carry their private half as an immutable string,
+ * which nothing can overwrite in place; those are dropped here and reclaimed by
+ * garbage collection rather than wiped.
  */
 import { WALLET_ACTIVITY_COLLECTION } from '@interop/wallet-core/space/collections'
 import type { EdvDocCipher } from '@interop/was-client/edv/core'
@@ -34,7 +34,7 @@ import { BundleInvalidError, CollectionLogUnreadableError } from '../errors.js'
 import type { ByteSource } from '@interop/space-archive'
 import { surveyArchive } from './archiveSurvey.js'
 import type { AppCollectionSurvey } from './archiveSurvey.js'
-import { walkCollection } from './collectionWalk.js'
+import { migrateCollection } from './collectionPass.js'
 import {
   descriptorFromCollectionLogFile,
   descriptorFromLogBody
@@ -50,7 +50,7 @@ import { CollectionTally, keyedRecord } from './report.js'
 import type { MigrationCollectionReport, MigrationReport } from './report.js'
 import { recipientFromSecret } from './secretToRecipient.js'
 import type { MigrationSecret } from './secretToRecipient.js'
-import { MIGRATION_WALK_ORDER, WALK_STOPPING_ERROR_NAME } from './sink.js'
+import { MIGRATION_ORDER, MIGRATION_STOPPING_ERROR_NAME } from './sink.js'
 import type {
   AppCollectionResource,
   MigrationSink,
@@ -58,11 +58,11 @@ import type {
 } from './sink.js'
 
 /**
- * One collection the walk enters, and where its Resources go. `app` is present
- * for an app collection and carries its survey and the sink's
+ * One collection the migration enters, and where its Resources go. `app` is
+ * present for an app collection and carries its survey and the sink's
  * `ensureCollection`.
  */
-type WalkStep = {
+type MigrationStep = {
   collectionId: string
   importResource: (options: AppCollectionResource) => Promise<SinkOutcome>
   app?: AppCollectionSurvey & {
@@ -73,23 +73,23 @@ type WalkStep = {
 }
 
 /**
- * The walk's steps in order: the standard collections, with the app
+ * The migration's steps in order: the standard collections, with the app
  * collections, by id, just before activity, which stays last.
  *
  * @param options {object}
  * @param options.sink {MigrationSink}
  * @param options.appCollections {Map<string, AppCollectionSurvey>}   sorted
  *   by id
- * @returns {WalkStep[]}
+ * @returns {MigrationStep[]}
  */
-function walkSteps({
+function migrationSteps({
   sink,
   appCollections
 }: {
   sink: MigrationSink
   appCollections: Map<string, AppCollectionSurvey>
-}): WalkStep[] {
-  const appSteps: WalkStep[] = []
+}): MigrationStep[] {
+  const appSteps: MigrationStep[] = []
   const appSink = sink.appCollections
   if (appSink !== undefined) {
     for (const [collectionId, app] of appCollections) {
@@ -103,8 +103,8 @@ function walkSteps({
       })
     }
   }
-  const steps: WalkStep[] = []
-  for (const { collectionId, method } of MIGRATION_WALK_ORDER) {
+  const steps: MigrationStep[] = []
+  for (const { collectionId, method } of MIGRATION_ORDER) {
     if (collectionId === WALLET_ACTIVITY_COLLECTION) {
       steps.push(...appSteps)
     }
@@ -133,7 +133,7 @@ function walkSteps({
  *   passphrase, its recovery code, or the backup credential the bundle carries
  * @param options.sink {MigrationSink}   the host's import functions
  * @param [options.signal] {AbortSignal}   checked between Resources, on every
- *   chunk read, and before each collection is entered; the walk throws its
+ *   chunk read, and before each collection is entered; the migration throws its
  *   `reason`
  * @param [options.onProgress] {function}   called once per Resource with
  *   `{ collectionId, index, outcome }`
@@ -167,9 +167,7 @@ export async function migrateBundle({
 
   // The structural refusals come first: they cost one pass over the archive,
   // where deriving the recipient from a passphrase costs an Argon2id run.
-  const migrated = new Set(
-    MIGRATION_WALK_ORDER.map(entry => entry.collectionId)
-  )
+  const migrated = new Set(MIGRATION_ORDER.map(entry => entry.collectionId))
   const survey = await surveyArchive({
     archive,
     migrated,
@@ -211,9 +209,12 @@ export async function migrateBundle({
       keyAgreementKey: recipient.keyAgreementKey
     })
 
-    const steps = walkSteps({ sink, appCollections: survey.appCollections })
+    const steps = migrationSteps({
+      sink,
+      appCollections: survey.appCollections
+    })
     for (const { collectionId, importResource, app } of steps) {
-      // An abort between collections ends the walk here, before the next
+      // An abort between collections ends the migration here, before the next
       // collection is entered or made on the host.
       if (signal?.aborted) {
         throw signal.reason
@@ -240,8 +241,8 @@ export async function migrateBundle({
             })
           })
           ciphers = built.ciphers
-          for (const cause of built.dropped) {
-            tally.countDroppedGeneration(cause)
+          for (const err of built.dropped) {
+            tally.countDroppedGeneration(err.name)
           }
         } else if (encrypted) {
           throw new CollectionLogUnreadableError(
@@ -274,7 +275,7 @@ export async function migrateBundle({
         }
       } catch (err) {
         // Resources have already reached the sink by now, so nothing here may
-        // end the walk without a report. An unreadable log is the expected
+        // end the migration without a report. An unreadable log is the expected
         // cause; any other (a descriptor body no cipher can be built from, a
         // descriptor whose current-epoch entry fails its key-wrap check for
         // every recovered generation, a host that could not make the
@@ -283,18 +284,18 @@ export async function migrateBundle({
         // rather than dropped from the report.
         const cause = (err as Error).name
         tally.stoppedBy = cause
-        const resources = survey.walkedResources.get(collectionId) ?? 0
+        const resources = survey.readResources.get(collectionId) ?? 0
         for (let index = 0; index < resources; index++) {
           tally.countUnopenable(cause)
         }
         collections.set(collectionId, tally.toReport())
-        if (cause === WALK_STOPPING_ERROR_NAME) {
+        if (cause === MIGRATION_STOPPING_ERROR_NAME) {
           stoppedAt = { collectionId, cause }
           break
         }
         continue
       }
-      const { stopped } = await walkCollection({
+      const { stopped } = await migrateCollection({
         archive,
         collectionId,
         importResource,
