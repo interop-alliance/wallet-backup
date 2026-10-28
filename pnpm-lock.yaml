@@ -12,8 +12,8 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@interop/space-archive':
-        specifier: ^0.9.0
-        version: 0.9.0
+        specifier: ^0.10.0
+        version: 0.10.0
       '@interop/storage-core':
         specifier: ^0.41.0
         version: 0.41.0
@@ -278,13 +278,9 @@ packages:
     resolution: {integrity: sha512-WxnkYKmg4y0eSMlXVUPlzHkZlWSRVlyjTBRQkrEtcmPY5A7gw/K/ANB9S8YPtOVWreV+RAATEvjF56CJGDU3Yg==}
     engines: {node: '>=24.0'}
 
-  '@interop/space-archive@0.9.0':
-    resolution: {integrity: sha512-yTV+TVXN+/uSwBUA6WsGEeObe/kKuB+MCPjQ3MzI5WdhzNRptU0Iq6VgU3sH6dtp9nmetggL0PAfBIuuav8NVg==}
+  '@interop/space-archive@0.10.0':
+    resolution: {integrity: sha512-OHvS7YqBTOCVmp1s6dpcVHHLIVF7Ilmq5oqWhJztP39kkRb+88/iusmbmPG1yD0pEoWy3mEbCAmS90nmC/D1Zg==}
     engines: {node: '>=24.0'}
-
-  '@interop/storage-core@0.36.0':
-    resolution: {integrity: sha512-yoBABfWtLwcUK8caPXKlPPNjq6AX4/SUJ/JRwa0ps8ihuxVfqwz6sMKbsvMDmVrLLjSOApY0innoTIDrtRGjrg==}
-    engines: {node: '>=22.0'}
 
   '@interop/storage-core@0.38.0':
     resolution: {integrity: sha512-wavRRv4uzKz9m21sdfZtOGeBy8TSgYWRgHTfq+SE7Dak/E2u77xmn4x7EaV4q3sPgmjFhSbz+YlzG6WpQor3mA==}
@@ -1571,9 +1567,9 @@ snapshots:
 
   '@interop/social-core@0.8.1': {}
 
-  '@interop/space-archive@0.9.0':
+  '@interop/space-archive@0.10.0':
     dependencies:
-      '@interop/storage-core': 0.36.0
+      '@interop/storage-core': 0.41.0
       events: 3.3.0
       mime-types: 3.0.2
       tar-stream: 3.2.2
@@ -1582,10 +1578,6 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
-
-  '@interop/storage-core@0.36.0':
-    dependencies:
-      '@interop/data-integrity-core': 8.9.0
 
   '@interop/storage-core@0.38.0':
     dependencies:

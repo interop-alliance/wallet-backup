@@ -1,5 +1,14 @@
 # @interop/wallet-backup Changelog
 
+## 0.8.0 - TBD
+
+### Changed
+
+- Breaking: requires `@interop/space-archive` 0.10.0, which renames the Space
+  and Collection Metadata files to `.space.meta.<spaceId>.json` and
+  `.collection.meta.<collectionId>.json`. Archives written under the old names
+  no longer classify. The browser bundle test packs the new name.
+
 ## 0.7.0 - 2026-10-27
 
 ### Changed

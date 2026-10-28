@@ -24,7 +24,7 @@ test('packs and reads an archive and a bundle in the browser', async ({
       spaceId: 'zBrowserSpace',
       entries: [
         {
-          name: '.space.zBrowserSpace.json',
+          name: '.space.meta.zBrowserSpace.json',
           bytes: new TextEncoder().encode(spaceDocument)
         }
       ]
@@ -65,7 +65,7 @@ test('packs and reads an archive and a bundle in the browser', async ({
     }
   }, SPACE_DOCUMENT)
   expect(result.spaceId).toBe('zBrowserSpace')
-  expect(result.files['space/zBrowserSpace/.space.zBrowserSpace.json']).toBe(
+  expect(result.files['space/zBrowserSpace/.space.meta.zBrowserSpace.json']).toBe(
     SPACE_DOCUMENT
   )
   expect(result.ubcVersion).toBe('0.1')

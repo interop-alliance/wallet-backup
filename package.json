@@ -38,7 +38,7 @@
   "sideEffects": false,
   "dependencies": {
     "@interop/social-core": "^0.8.1",
-    "@interop/space-archive": "^0.9.0",
+    "@interop/space-archive": "^0.10.0",
     "@interop/storage-core": "^0.41.0",
     "@interop/vh-resource-log": "^0.9.0",
     "@scure/base": "^2.4.0",
