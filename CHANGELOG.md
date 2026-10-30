@@ -1,5 +1,24 @@
 # @interop/wallet-backup Changelog
 
+## 0.9.0 - TBD
+
+### Changed
+
+- Breaking: requires `@interop/space-archive` 0.11.0. The bundle manifest's own
+  `manifest.yml` entry now cites `https://w3id.org/pws#archive-manifest`, the
+  PWS spec's Archive manifest section, in place of the FEP-6fcd manifest-file
+  URL. This is wire text in written bundles; bundles written before this version
+  carry the FEP URL. No reader path compares the value (WBU-12).
+- Requires `@interop/storage-core` 0.42.0, `@interop/wallet-core` 0.109.0 and
+  `@interop/was-client` 0.101.0; `test:dist` passes again (WBU-13).
+
+### Fixed
+
+- The migration test fixtures write the `.space.meta.<spaceId>.json` and
+  `.collection.meta.<collectionId>.json` names through space-archive's file-name
+  builders, and seal chunked fixtures with was-client's `spaceUrl` codec
+  parameter, so the migration tests exercise the Collection Metadata path again.
+
 ## 0.8.0 - 2026-10-27
 
 ### Changed

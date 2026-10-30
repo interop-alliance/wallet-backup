@@ -12,5 +12,6 @@
 export {
   collectBytes,
   packSpaceArchive,
-  readSpaceArchive
+  readSpaceArchive,
+  spaceMetadataFileName
 } from '@interop/space-archive'

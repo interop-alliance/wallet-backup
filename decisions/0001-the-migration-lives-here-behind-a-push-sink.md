@@ -1,19 +1,26 @@
-# 0001: The migration walk lives here, behind a push sink port
+# 0001: The migration lives here, behind a push sink port
 
 - Status: accepted
 - Date: 2026-09-17
+- Amendments:
+  - 2026-09-18: the per-Space archive codec moved to `@interop/space-archive`.
+  - 2026-10-29: the layout's normative home is the PWS spec; the record is
+    renamed from `0001-the-walk-lives-here-behind-a-push-sink.md` and says
+    "migration" and "collection pass" for what it called the walk (WBU-11), and
+    describes the bundle manifest by its dialect, not as FEP-6fcd (WBU-12).
 - Driving work: the design for migrating a backup bundle's content into a new
   wallet account, on any server, from the bundle file and one old secret alone.
 - Affects: `@interop/wallet-backup` (the bundle reader, the per-Space archive
-  codec, the secret-to-user-key derivation, the decrypt walk, the sink port, the
-  report); freewallet and dcw (each implements the sink over its own stores);
-  was-teaching-server (both backends write the per-Space archive through this
-  package's writer).
+  codec, the secret-to-user-key derivation, the collection pass, the sink port,
+  the report); freewallet and dcw (each implements the sink over its own
+  stores); was-teaching-server (both backends write the per-Space archive
+  through this package's writer).
 
 ## Context
 
-A bundle is tar-in-tar: an outer archive with a FEP-6fcd `manifest.yml` and one
-per-Space export archive per Space, verbatim server bytes. The migration reads
+A bundle is tar-in-tar: an outer archive with a `manifest.yml` in the per-Space
+archive manifest's dialect and one per-Space export archive per Space, verbatim
+server bytes. The migration reads
 the account Space archive, derives the old user key from an old secret through
 the archived user-key roster, decrypts each standard collection's envelopes, and
 writes plaintext rows into the new account. Two wallets share the ceremonies
@@ -30,12 +37,12 @@ backend, and parsed by no client.
 `@interop/wallet-backup` owns the whole read side: the outer tar codec, the
 manifest parse and archive-role vocabulary, the per-Space archive reader and
 writer with the file-name codec, the packed backup credential's reading and
-unsealing, the derivation, the decrypt walk, and the report. It issues no HTTP
-request and holds no collection in memory.
+unsealing, the derivation, the collection pass, and the report. It issues no
+HTTP request and holds no collection in memory.
 
-The walk drives the loop (push). The host passes a sink with one method per
+The migration drives the loop (push). The host passes a sink with one method per
 migrated collection; each method takes one plaintext row and returns `accepted`,
-`skipped`, `conflicting`, or `failed`. The walk awaits each call before
+`skipped`, `conflicting`, or `failed`. The migration awaits each call before
 decrypting the next row, takes an `AbortSignal` for cancel and an `onProgress`
 callback, and computes the report. The package knows no wallet row types; the
 sink is the only wallet-specific code.
@@ -47,9 +54,10 @@ the parties table with a counterpart test on each side.
 
 ## Rejected Alternatives
 
-- The walk in `@interop/wallet-core`. It would pull tar and manifest parsing
-  into the ceremony package, which has no I/O of its own, and the primitives the
-  walk composes are already exported from wallet-core's subpaths.
+- The migration in `@interop/wallet-core`. It would pull tar and manifest
+  parsing into the ceremony package, which has no I/O of its own, and the
+  primitives the migration composes are already exported from wallet-core's
+  subpaths.
 - A tar-only package with each wallet running its own decrypt loop. Two copies
   of the derivation and epoch fallback, against the no-reimplementation rule.
 - A pull shape (an async iterable the host consumes). Backpressure and cancel
@@ -64,29 +72,40 @@ the parties table with a counterpart test on each side.
 
 - The server depends on this package for its export writer. A codec change is a
   coordinated release across the server, this package, and the profile spec.
-- A sink method that throws a quota-named error stops the walk; ten consecutive
-  failures end the current collection. Both are the walk's rules, not the
-  sink's.
+- A sink method that throws a quota-named error stops the migration; ten
+  consecutive failures end the current collection. Both are the migration's
+  rules, not the sink's.
 - dcw implements a second sink and gets the same report shape.
 
 ## Revisit Criteria
 
 1. A second server implementation exports a per-Space archive in a layout this
    codec cannot read; the profile text then governs and the codec follows it.
-2. The walk needs to write to the server directly (for instance a restore that
-   bypasses the wallet's own stores); the no-HTTP rule would then need a stated
-   exception rather than a quiet one.
+2. The migration needs to write to the server directly (for instance a restore
+   that bypasses the wallet's own stores); the no-HTTP rule would then need a
+   stated exception rather than a quiet one.
 
 ## Amendment (2026-09-18)
 
 The per-Space archive codec's one implementation now lives in
 `@interop/space-archive`, not in this package. This package consumes it for the
-bundle codec and for the migration walk; the WAS reference server consumes it
-for export. This package stays the migration walk's home: the decision above
-still holds for the outer tar codec, the manifest parse and archive-role
-vocabulary, the packed backup credential's reading and unsealing, the
-derivation, the decrypt walk, and the report. Only the per-Space archive reader
-and writer moved, because the server needed only the codec and was installing
-the walk's whole dependency set (`@interop/wallet-core`, `@interop/was-client`,
+bundle codec and for the migration; the PWS reference server consumes it for
+export. This package stays the migration's home: the decision above still holds
+for the outer tar codec, the manifest parse and archive-role vocabulary, the
+packed backup credential's reading and unsealing, the derivation, the collection
+pass, and the report. Only the per-Space archive reader and writer moved,
+because the server needed only the codec and was installing the migration's
+whole dependency set (`@interop/wallet-core`, `@interop/was-client`,
 `@interop/social-core`, `@interop/vh-resource-log`, Argon2) through this package
 to get it.
+
+## Amendment (2026-10-29)
+
+The layout's normative home is the Portable Web Spaces spec, not the portable
+wallet profile spec: its "Space Archive Format" section
+(`https://w3c-ccg.github.io/portable-web-spaces-spec/#space-archive-format`, PWS
+decision 0014, WASS-7). "The layout is profile text in the portable wallet
+profile spec" above and the rejected alternative "the archive codec as spec text
+alone" read accordingly: the text now exists, in the core spec, and the codec
+follows it. Revisit criterion 1 stands with "the PWS spec text" in place of "the
+profile text".

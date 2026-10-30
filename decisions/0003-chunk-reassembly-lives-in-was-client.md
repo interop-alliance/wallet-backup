@@ -4,7 +4,7 @@
 - Date: 2026-09-28
 - Driving work: the design for migrating chunked Resources in encrypted app
   collections out of a backup bundle, offline.
-- Affects: `@interop/wallet-backup` (`src/migrate/collectionWalk.ts`, invariant
+- Affects: `@interop/wallet-backup` (`src/migrate/collectionPass.ts`, invariant
   7); `@interop/was-client` (`EdvDocCipher.decrypt` and `EdvCodec`'s chunked
   read).
 
@@ -12,9 +12,9 @@
 
 A chunked Resource in an encrypted collection is an envelope that seals a chunk
 count, plus chunk Resources that each carry their own JWE. In a backup bundle
-the chunks are files in the per-Space archive. The migration walk must
-reassemble them without issuing a request and without evaluating a transport
-module (invariant 7).
+the chunks are files in the per-Space archive. The migration must reassemble
+them without issuing a request and without evaluating a transport module
+(invariant 7).
 
 was-client already reassembles chunked envelopes over WAS routes. Its reader
 checks that the chunk count is the sealed one and that chunks are addressed by
@@ -26,7 +26,7 @@ chunks.
 Reassembly and its checks stay in was-client. `EdvDocCipher.decrypt` takes a
 `chunkSource` option in place of a request context, a function that returns one
 chunk per `{ docId, chunkIndex }`. was-client wraps it in a local `Transport`
-and runs its existing reader over it. The walk supplies the source from the
+and runs its existing reader over it. The migration supplies the source from the
 archive's chunk files and does nothing else with the chunk bytes.
 
 ## Rejected Alternatives
@@ -37,8 +37,9 @@ archive's chunk files and does nothing else with the chunk bytes.
   reads its own directory layout. Either route duplicates upstream logic and
   loses the checks.
 - A shim request context that serves `.../chunks/<n>` from the archive to a
-  cipher built with a `spaceId`. It loads `WasTransport` into the walk's import
-  graph, which breaks invariant 7, and ties the walk to WAS URL paths.
+  cipher built with a `spaceId`. It loads `WasTransport` into the migration's
+  import graph, which breaks invariant 7, and ties the migration to WAS URL
+  paths.
 
 ## Consequences
 
@@ -47,8 +48,8 @@ archive's chunk files and does nothing else with the chunk bytes.
   network path together.
 - wallet-backup's was-client peer range follows the release that carries
   `chunkSource`.
-- The walk's import graph reaches one transport, an in-memory one over bytes
-  already read from the archive.
+- The migration's import graph reaches one transport, an in-memory one over
+  bytes already read from the archive.
 
 ## Revisit Criteria
 

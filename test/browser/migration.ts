@@ -24,14 +24,13 @@ import {
   collectionDescriptor,
   collectionDir,
   collectionLogFile,
-  jsonFile,
   keyMapDir,
   logBody,
   mintGenerations,
   recipientFor,
   rosterDescriptor,
   sealBinaryResources,
-  FIXTURE_SPACE_ID
+  fixtureSpaceMetadataFile
 } from '../fixtures/migration/bundle.js'
 
 /**
@@ -64,10 +63,7 @@ export async function migrateChunkedBundle(): Promise<{
   })
   const bundle = await buildBundle({
     entries: [
-      jsonFile({
-        name: `.space.${FIXTURE_SPACE_ID}.json`,
-        document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-      }),
+      fixtureSpaceMetadataFile(),
       keyMapDir(logBody(roster)),
       collectionDir({
         collectionId: 'photos',

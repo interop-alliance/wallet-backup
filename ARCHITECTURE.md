@@ -53,7 +53,7 @@ The dependency direction inside this package is one way: `migrate/` reads
    `mtime` (`EXPORT_ENTRY_MTIME`), so two packs of an unchanged entry tree are
    byte-identical. Upheld by `@interop/space-archive`'s writer and this
    package's `writeBundle.ts`, and pinned by the checked-in fixture in that
-   package, which a counterpart test in the WAS reference server compares its
+   package, which a counterpart test in the PWS reference server compares its
    own export against.
 2. **A Space archive's bytes pass through a bundle untouched.** The bundle is a
    container, not a re-encoding: `writeBundle` copies each archive verbatim and
@@ -109,10 +109,12 @@ The dependency direction inside this package is one way: `migrate/` reads
    deriving anything: only the salt may differ, and a descriptor naming another
    algorithm or cost is refused with `BundleInvalidError`, so a tampered bundle
    cannot choose the Argon2id work the reader pays.
-6. **Role anchors and manifest URLs are permanent wire text.** They are exported
-   constants (`BUNDLE_ROLE`, the six archive manifest URLs) and are copied,
-   never rewritten -- a reader finds the account Space archive by matching an
-   anchor, and nothing else marks which tar is which.
+6. **Role anchors are permanent wire text.** `BUNDLE_ROLE` is an exported
+   constant whose values are copied as they are, and a reader finds the account
+   Space archive by matching an anchor. Nothing else marks which tar is which.
+   The bundle manifest's own `url` is wire text too, but no reader path compares
+   it. It is space-archive's `MANIFEST_URL`, and it changed once, in 0.9.0, from
+   the FEP-6fcd manifest-file URL to the PWS Archive manifest section (WBU-12).
 7. **The migration issues no request, and the package evaluates no transport
    module.** The migration builds its ciphers without a `spaceId` and reads
    every descriptor out of the archive. The only transport its graph reaches is
@@ -192,11 +194,12 @@ The dependency direction inside this package is one way: `migrate/` reads
 
 ## Ownership heuristics
 
-- The archive dialect (file names, manifest shape, pack order) belongs to
-  `@interop/space-archive`, shared with the WAS reference server, which builds
-  the entry trees out of its own storage backends. A change to it is a change to
-  both, and to this package as a consumer of the reader and writer. See that
-  package's AGENTS.md for its own parties table.
+- The archive dialect (file names, manifest shape, pack order) is specified by
+  the Portable Web Spaces spec's "Space Archive Format" section and implemented
+  in `@interop/space-archive`, shared with the PWS reference server, which
+  builds the entry trees out of its own storage backends. A change to it is a
+  spec change first, then a change to both, and to this package as a consumer of
+  the reader and writer. See that package's AGENTS.md for its own parties table.
 - Chunk reassembly and its checks (the sealed count, the bound id, each chunk's
   binding) belong to `@interop/was-client`. The migration hands it a chunk
   source over the archive's chunk files and does nothing else with their bytes.
@@ -227,7 +230,7 @@ The dependency direction inside this package is one way: `migrate/` reads
   in `src/bundle/`. Avoid: backup file, export file, archive (which means the
   inner per-Space tar here).
 - **Per-Space archive** -- the UBC v0.1 export tarball of a single Space, the
-  dialect the WAS reference server writes. Carried verbatim inside a bundle as
+  dialect the PWS reference server writes. Carried verbatim inside a bundle as
   `spaces/<spaceId>.tar`. Reader and writer live in `@interop/space-archive`;
   this package consumes them for the bundle codec and the migration. Avoid:
   space export, space dump, inner tar.
@@ -284,8 +287,8 @@ The dependency direction inside this package is one way: `migrate/` reads
   decrypted Resource and answering `accepted`, `skipped`, `conflicting` or
   `failed`. The only wallet-specific code the migration touches, and the reason
   this package knows no wallet data types. See
-  `decisions/0001-the-walk-lives-here-behind-a-push-sink.md`. Avoid: writer,
-  handler, callback, consumer.
+  `decisions/0001-the-migration-lives-here-behind-a-push-sink.md`. Avoid:
+  writer, handler, callback, consumer.
 - **Generation** -- one epoch of the account's user key, recovered from the
   archived roster. Every generation is wrapped to every enrolled secret, so one
   old secret recovers the whole history; a Resource is opened by whichever

@@ -76,7 +76,7 @@ counted as not migrated.
   collection today. A stored blinded content-identity index would make them
   direct; the value would be the same one computed here.
 - On a remembered session the checks read the local replica, which can lag the
-  remote; the walk awaits each synced collection's in-sync state before its
+  remote; the migration awaits each synced collection's in-sync state before its
   first read.
 - The bytes rule needs a was-client write-by-id path that accepts a chunk plan.
   It trusts the bundle's ids, so a doctored bundle's bytes at a genuine id count

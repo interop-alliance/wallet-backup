@@ -25,6 +25,7 @@ import {
 } from '@interop/was-client/edv/core'
 import type { RecipientPublicKey } from '@interop/was-client/edv/core'
 import { createEdvEncryption } from '@interop/was-client/edv'
+import { resourceUrl } from '@interop/was-client/paths'
 import type {
   ChunkedWrite,
   CodecRequestContext,
@@ -44,8 +45,10 @@ import {
 import {
   chunkDirName,
   collectBytes,
+  collectionMetadataFileName,
   fileNameFor,
-  packSpaceArchive
+  packSpaceArchive,
+  spaceMetadataFileName
 } from '@interop/space-archive'
 import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
 import { base64urlnopad } from '@scure/base'
@@ -61,6 +64,12 @@ export type Generation = Awaited<ReturnType<typeof mintUserKey>>
  * The fixture account Space's id.
  */
 export const FIXTURE_SPACE_ID = 'zMigrationSpace'
+
+/**
+ * The fixture Space's URL, which the EDV codec needs only to label its ciphers
+ * and address the chunk writes the fixture's in-memory request sink records.
+ */
+const FIXTURE_SPACE_URL = `https://was.example/space/${FIXTURE_SPACE_ID}/`
 
 /**
  * The fixture bundle's provenance.
@@ -88,6 +97,18 @@ export function jsonFile({
   document: unknown
 }): ArchiveFile {
   return { name, bytes: new TextEncoder().encode(JSON.stringify(document)) }
+}
+
+/**
+ * The fixture Space's metadata file, the entry every fixture archive opens
+ * with.
+ * @returns {ArchiveFile}
+ */
+export function fixtureSpaceMetadataFile(): ArchiveFile {
+  return jsonFile({
+    name: spaceMetadataFileName(FIXTURE_SPACE_ID),
+    document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
+  })
 }
 
 /**
@@ -262,7 +283,7 @@ export async function sealedCustom({
     resolveKeys: async () => userKeyVaultKeys({ userKey: generation })
   })
   const codec = await provider.codecFor({
-    spaceId: FIXTURE_SPACE_ID,
+    spaceUrl: FIXTURE_SPACE_URL,
     collectionId,
     scheme: 'edv',
     encryption
@@ -405,7 +426,7 @@ export function collectionDir({
   metadata?: unknown
   metadataFile?: 'omit' | 'broken'
 }): ArchiveEntry {
-  const name = `.collection.${collectionId}.json`
+  const name = collectionMetadataFileName(collectionId)
   const metadataFiles: ArchiveFile[] = []
   if (metadataFile === 'broken') {
     metadataFiles.push({ name, bytes: new TextEncoder().encode('not json') })
@@ -498,7 +519,7 @@ export async function sealBinaryResources({
     maxBlobBytes,
     chunkSize
   }).codecFor({
-    spaceId: FIXTURE_SPACE_ID,
+    spaceUrl: FIXTURE_SPACE_URL,
     collectionId,
     scheme: 'edv',
     encryption
@@ -509,10 +530,10 @@ export async function sealBinaryResources({
   const store = new Map<string, Uint8Array>()
   const context: CodecRequestContext = {
     async request(input) {
-      const path = input.path as string
+      const url = input.url
       const method = input.method ?? 'GET'
-      const chunkIndex = path.includes('/chunks/')
-        ? Number(path.slice(path.lastIndexOf('/') + 1))
+      const chunkIndex = url.includes('/chunks/')
+        ? Number(url.slice(url.lastIndexOf('/') + 1))
         : undefined
       if (
         tearChunksFrom !== undefined &&
@@ -524,11 +545,11 @@ export async function sealBinaryResources({
         throw Object.assign(new Error('HTTP 500'), { status: 500 })
       }
       if (method === 'PUT') {
-        store.set(path, input.body as Uint8Array)
+        store.set(url, input.body as Uint8Array)
       } else if (method === 'DELETE') {
-        store.delete(path)
+        store.delete(url)
       } else {
-        throw Object.assign(new Error(`HTTP 404 ${path}`), { status: 404 })
+        throw Object.assign(new Error(`HTTP 404 ${url}`), { status: 404 })
       }
       return {
         headers: {
@@ -564,7 +585,16 @@ export async function sealBinaryResources({
         throw err
       }
     })
-    const prefix = `/space/${FIXTURE_SPACE_ID}/${collectionId}/${write.id}`
+    // The codec addresses its writes with was-client's URL builders, so the
+    // same builder yields the key the envelope was stored under.
+    const prefix = resourceUrl({
+      spaceUrl: FIXTURE_SPACE_URL,
+      collectionId,
+      resourceId: write.id
+    })
+    if (!store.has(prefix)) {
+      throw new Error(`fixture: no envelope stored for ${write.id}`)
+    }
     const chunks: BytesFile[] = []
     for (let index = 0; store.has(`${prefix}/chunks/${index}`); index += 1) {
       chunks.push({

@@ -41,6 +41,7 @@ import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
 import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
 import {
   collectBytes,
+  COLLECTION_POLICY_FILE_NAME,
   fileNameFor,
   packSpaceArchive,
   parseResourceFileName
@@ -82,7 +83,8 @@ import {
   recipientFor,
   rosterDescriptor,
   FIXTURE_META,
-  FIXTURE_SPACE_ID
+  FIXTURE_SPACE_ID,
+  fixtureSpaceMetadataFile
 } from '../fixtures/migration/bundle.js'
 import type { BytesFile, Generation } from '../fixtures/migration/bundle.js'
 
@@ -220,7 +222,7 @@ function textFile(
  * @returns {{ name: string, bytes: Uint8Array }}
  */
 function policyFile(body: string): { name: string; bytes: Uint8Array } {
-  return textFile('.collection.policy.json', body)
+  return textFile(COLLECTION_POLICY_FILE_NAME, body)
 }
 
 /**
@@ -282,10 +284,7 @@ async function fixtureSpaceEntries({
     })
   })
   const entries = [
-    jsonFile({
-      name: `.space.${FIXTURE_SPACE_ID}.json`,
-      document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-    }),
+    fixtureSpaceMetadataFile(),
     keyMapDir(
       logBody(roster, {
         ...(earlierRosters !== undefined && { earlier: earlierRosters })
@@ -770,13 +769,7 @@ describe('migrateBundle', () => {
     })
     roster.epochs![0] = retiredEpoch.epochs![0]!
 
-    const entries = [
-      jsonFile({
-        name: `.space.${FIXTURE_SPACE_ID}.json`,
-        document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-      }),
-      keyMapDir(logBody(roster))
-    ]
+    const entries = [fixtureSpaceMetadataFile(), keyMapDir(logBody(roster))]
     const encryption = await collectionDescriptor({ openedBy: [[older!]] })
     entries.push(
       collectionDir({
@@ -1449,10 +1442,7 @@ describe('migrateBundle', () => {
     const { code } = await recoverySecret()
     const bundle = await buildBundle({
       entries: [
-        jsonFile({
-          name: `.space.${FIXTURE_SPACE_ID}.json`,
-          document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-        }),
+        fixtureSpaceMetadataFile(),
         keyMapDir('garbage bytes, not a resource log')
       ]
     })
@@ -1475,10 +1465,7 @@ describe('migrateBundle', () => {
     const encryption = await collectionDescriptor({ openedBy: [[generation!]] })
     const bundle = await buildBundle({
       entries: [
-        jsonFile({
-          name: `.space.${FIXTURE_SPACE_ID}.json`,
-          document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-        }),
+        fixtureSpaceMetadataFile(),
         collectionDir({
           collectionId: CONTACTS_COLLECTION,
           files: [
@@ -1509,12 +1496,7 @@ describe('migrateBundle', () => {
     const archive = await collectBytes(
       (await packSpaceArchive({
         spaceId: FIXTURE_SPACE_ID,
-        entries: [
-          jsonFile({
-            name: `.space.${FIXTURE_SPACE_ID}.json`,
-            document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-          })
-        ]
+        entries: [fixtureSpaceMetadataFile()]
       })) as unknown as AsyncIterable<Uint8Array>
     )
     const bundle = await collectBytes(
@@ -1561,10 +1543,7 @@ describe('migrateBundle', () => {
     })}\n`
     const bundle = await buildBundle({
       entries: [
-        jsonFile({
-          name: `.space.${FIXTURE_SPACE_ID}.json`,
-          document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-        }),
+        fixtureSpaceMetadataFile(),
         keyMapDir(logBody(roster)),
         collectionDir({
           collectionId: CONTACTS_COLLECTION,
@@ -1624,10 +1603,7 @@ describe('migrateBundle', () => {
     const encryption = await collectionDescriptor({ openedBy: [[generation!]] })
     const bundle = await buildBundle({
       entries: [
-        jsonFile({
-          name: `.space.${FIXTURE_SPACE_ID}.json`,
-          document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-        }),
+        fixtureSpaceMetadataFile(),
         keyMapDir(logBody(roster)),
         collectionDir({
           collectionId: CONTACTS_COLLECTION,

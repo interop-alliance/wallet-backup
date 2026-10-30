@@ -146,9 +146,11 @@ over every row of this table** -- for each row, resolve the impact as shipped
 explicitly waived (`unaffected: <repo> (<why>)`). A breaking change is named as
 such in each implementing package's CHANGELOG.
 
-The per-Space archive layout each bundle carries is a separate contract, owned
-by `@interop/space-archive`. See that package's AGENTS.md for its own parties
-table.
+The per-Space archive layout each bundle carries is a separate contract,
+specified by the Portable Web Spaces spec's "Space Archive Format" section
+(`https://w3c-ccg.github.io/portable-web-spaces-spec/#space-archive-format`) and
+implemented once, in `@interop/space-archive`. See that package's AGENTS.md for
+its own parties table.
 
 | Repo                         | Modules speaking the contract                                                                                                                                                                                     | Item reference |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |

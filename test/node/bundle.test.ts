@@ -8,6 +8,7 @@ import {
   collectBytes,
   packSpaceArchive,
   readSpaceArchive,
+  spaceMetadataFileName,
   EXPORT_ENTRY_MTIME
 } from '@interop/space-archive'
 import {
@@ -46,7 +47,7 @@ async function packFixtureArchive(
       spaceId,
       entries: [
         {
-          name: `.space.${spaceId}.json`,
+          name: spaceMetadataFileName(spaceId),
           bytes: new TextEncoder().encode(JSON.stringify({ id: spaceId }))
         }
       ]
@@ -241,9 +242,7 @@ describe('writeBundle and readBundle', () => {
     // The role anchors are permanent wire text, so they are pinned here as
     // literals rather than through the constants that write them.
     expect(bundle.manifest.contents).toEqual({
-      'manifest.yml': {
-        url: 'https://codeberg.org/fediverse/fep/src/branch/main/fep/6fcd/fep-6fcd.md#manifest-file'
-      },
+      'manifest.yml': { url: 'https://w3id.org/pws#archive-manifest' },
       'backup-credential.json': {
         url: 'https://interop-alliance.github.io/portable-wallet-profile-spec/#packed-backup-credential'
       },

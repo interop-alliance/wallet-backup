@@ -1,6 +1,6 @@
 # Wallet-Backup (open items)
 
-nextAvailableId: 12
+nextAvailableId: 14
 
 Status as of 2026-09-18. Uses the formalized item structure shared with the
 freewallet and was-teaching-server roadmaps.

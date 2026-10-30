@@ -2,14 +2,16 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The outer bundle's `manifest.yml`: the FEP-6fcd manifest that names what a
- * backup bundle holds, and the role URLs its `contents` entries are annotated
- * with. Those URLs are permanent wire text -- a reader finds the account Space
- * archive by matching the `#account-space-archive` anchor, and nothing else in
- * the bundle marks which tar is which -- so they live here as named constants
- * and are never rewritten.
+ * The outer bundle's `manifest.yml`: the manifest that names what a backup
+ * bundle holds, in the same dialect as the per-Space archive manifest (its own
+ * entry cites the PWS spec section that defines that dialect), and the role
+ * URLs its `contents` entries are annotated with. Those URLs are permanent
+ * wire text -- a reader finds the account Space archive by matching the
+ * `#account-space-archive` anchor, and nothing else in the bundle marks which
+ * tar is which -- so they live here as named constants and are never
+ * rewritten.
  */
-import { UBC_MANIFEST_URL } from '@interop/space-archive'
+import { MANIFEST_URL } from '@interop/space-archive'
 
 /**
  * The bundle's own manifest file name, the first entry of every bundle.
@@ -120,7 +122,7 @@ export function spaceArchivePath(spaceId: string): string {
 }
 
 /**
- * Builds the bundle's manifest document: the FEP-6fcd `contents` tree over the
+ * Builds the bundle's manifest document: the `contents` tree over the
  * manifest itself, the optional packed backup credential, and the `spaces/`
  * directory with one role-annotated entry per Space, in the order they are
  * packed.
@@ -146,7 +148,7 @@ export function buildBundleManifest({
     meta,
     spec: { ...BUNDLE_SPEC },
     contents: {
-      [BUNDLE_MANIFEST_FILE]: { url: UBC_MANIFEST_URL },
+      [BUNDLE_MANIFEST_FILE]: { url: MANIFEST_URL },
       ...(backupCredential && {
         [BACKUP_CREDENTIAL_FILE]: { url: BUNDLE_ROLE.packedBackupCredential }
       }),
@@ -161,7 +163,7 @@ export function buildBundleManifest({
 }
 
 /**
- * Reads the `url` off one FEP `contents` entry, which is either a single-key
+ * Reads the `url` off one `contents` entry, which is either a single-key
  * object mapping a file name to its annotation, or a bare file-name string
  * (annotated with nothing).
  * @param entry {unknown}

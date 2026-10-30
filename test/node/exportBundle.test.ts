@@ -3,7 +3,11 @@
  */
 import { describe, expect, it } from 'vitest'
 import { base64urlnopad } from '@scure/base'
-import { collectBytes, packSpaceArchive } from '@interop/space-archive'
+import {
+  collectBytes,
+  packSpaceArchive,
+  spaceMetadataFileName
+} from '@interop/space-archive'
 import {
   exportBundle,
   readBundle,
@@ -46,7 +50,7 @@ async function packFixtureArchive(spaceId: string): Promise<Uint8Array> {
       spaceId,
       entries: [
         {
-          name: `.space.${spaceId}.json`,
+          name: spaceMetadataFileName(spaceId),
           bytes: new TextEncoder().encode(JSON.stringify({ id: spaceId }))
         }
       ]

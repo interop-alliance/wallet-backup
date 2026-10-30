@@ -34,13 +34,12 @@ import {
   collectionDir,
   collectionLogFile,
   encryptResources,
-  jsonFile,
   keyMapDir,
   logBody,
   mintGenerations,
   recipientFor,
   rosterDescriptor,
-  FIXTURE_SPACE_ID
+  fixtureSpaceMetadataFile
 } from '../fixtures/migration/bundle.js'
 
 /**
@@ -248,10 +247,7 @@ async function oneCollectionBundle({
   })
   const encryption = await collectionDescriptor({ openedBy: [[generation!]] })
   const entries = [
-    jsonFile({
-      name: `.space.${FIXTURE_SPACE_ID}.json`,
-      document: { id: FIXTURE_SPACE_ID, type: ['Space'] }
-    }),
+    fixtureSpaceMetadataFile(),
     keyMapDir(logBody(roster)),
     collectionDir({
       collectionId: CONTACTS_COLLECTION,

@@ -651,3 +651,97 @@ was called out in the review of the WBU-9 change set; its new prose says
 "migration" and the rest of the repo was left as it was.
 
 discovered-from: WBU-9 (2026-10-27).
+
+### WBU-12: Pick up space-archive's manifest `url` change and settle the bundle manifest's own `url`
+
+- status: done (2026-10-29)
+- priority: medium
+- labels: wire-contract, bundle, cross-repo
+- discovered-from: SAR-9 (space-archive)
+- blocked-by: SAR-9 (shipped there 2026-10-29, published as space-archive
+  0.11.0)
+- touches:
+  - wallet-backup (this repo): shipped 2026-10-29 -- `src/bundle/manifest.ts`
+    imports `MANIFEST_URL` for the bundle's own `manifest.yml` entry and its
+    comments no longer call the bundle manifest "the FEP-6fcd manifest";
+    `test/node/bundle.test.ts` pins `https://w3id.org/pws#archive-manifest`;
+    `package.json` requires space-archive 0.11.0; AGENTS.md's parties-table note
+    and ARCHITECTURE.md's ownership heuristic point at the PWS Space Archive
+    Format section (ARCHITECTURE.md invariant 6 is scoped to the role anchors
+    and records the `url` change); CHANGELOG 0.9.0
+  - space-archive: shipped as 0.11.0 (SAR-9) -- the per-Space archive's manifest
+    `url` values are the PWS spec identifier plus the section anchor;
+    `RESOURCE_URL` removed, `MANIFEST_URL` replaces `UBC_MANIFEST_URL`; both
+    fixtures repacked
+  - portable-web-spaces-spec: shipped on the `export-import-format` branch (PR
+    #92, open 2026-10-29) -- the Space Archive Format's "The manifest" section
+    (`#archive-manifest`) defines `https://w3id.org/pws#archive-manifest`, the
+    URL the bundle manifest's own `manifest.yml` entry cites
+- acceptance:
+  - [x] the package builds against the space-archive version that carries SAR-9,
+        with no import of `UBC_MANIFEST_URL` or `RESOURCE_URL`
+  - [x] the bundle manifest's own `manifest.yml` entry cites the URL the wallet
+        profile spec names for it (decided with the maintainer before it is
+        coded; the candidates are the PWS Archive manifest section
+        `https://w3id.org/pws#archive-manifest`, a wallet-profile-spec section
+        of the bundle's own, or no `url`), and `test/node/bundle.test.ts` pins
+        that literal. Decided 2026-10-29: the PWS Archive manifest section,
+        space-archive's `MANIFEST_URL`
+  - [x] the reader still finds the account Space archive by the
+        `#account-space-archive` role anchor; no reader path compares the
+        manifest entry's `url`
+  - [x] AGENTS.md, ARCHITECTURE.md and the module comment in
+        `src/bundle/manifest.ts` no longer describe the bundle manifest as the
+        FEP-6fcd manifest
+  - [x] CHANGELOG entry names the change as wire text in written bundles, and
+        that bundles written before it carry the FEP URL
+
+Context: the outer bundle's `manifest.yml` entry lists itself with a `url`, and
+that `url` has been the FEP-6fcd manifest-file section, borrowed through
+space-archive's `UBC_MANIFEST_URL`. SAR-9 removed that constant: the PWS spec
+now defines the per-Space archive manifest itself, so the per-Space archive
+cites the spec's Archive manifest section, and the FEP is only an editorial
+credit. The bundle is a different layout from the per-Space archive. It is
+specified by the wallet profile spec, not the PWS spec, so the per-Space
+archive's new URL is not automatically the right one for the bundle manifest.
+Until this lands the package does not build against the new space-archive
+version, and a bundle keeps citing an unofficial community draft as the
+specification of its own manifest. The bundle reader classifies the archives it
+holds by the role anchors under `spaces/`, so the choice changes nothing it
+reads.
+
+### WBU-13: `test:dist` fails under was-client 0.100.1: the `./paths` entry reaches the request module
+
+- status: done (2026-10-29)
+- priority: high
+- labels: cross-repo, transport-closure
+- touches:
+  - was-client: shipped as 0.101.0 (WCL-145) -- `src/internal/rootCapability.ts`
+    holds the root capability grammar and `spaceUrlOf`, `./paths` re-exports
+    from it, the import-graph test walks the entry, and ARCHITECTURE.md
+    invariant 9 names `./paths` as held off the transport graph
+  - unaffected: wallet-core (its record envelope keeps importing
+    `canonicalSpaceUrl` from `@interop/was-client/paths`; the entry's surface is
+    unchanged)
+  - wallet-backup (this repo): shipped 2026-10-29 -- `package.json` requires
+    was-client 0.101.0, `test/probe/transportClosure.mjs` passes (551 modules,
+    none transport), CHANGELOG 0.9.0 names the version
+- acceptance:
+  - [x] `pnpm run test:dist` passes against published was-client and wallet-core
+        versions
+  - [x] ARCHITECTURE.md invariant 7 ("the package evaluates no transport
+        module") holds without an allowance for the paths entry
+
+Context: the dist probe loads the built package entry and fails when any
+was-client module that talks to a server is resolved. Under was-client 0.100.1
+it fails: `dist/bundle/backupCredential.js` imports wallet-core's record
+envelope, which imports `@interop/was-client/paths` for `canonicalSpaceUrl`, and
+that entry re-exports the root-capability builders from `internal/revoke.js`,
+which imports `internal/request.js`. The paths-to-revoke edge predates 0.100.1;
+the record envelope's paths import is what is new. Nothing in this package calls
+the transport; the module is only evaluated. The fix is upstream in was-client
+(and is still present at that repo's unpublished head), so this item parks the
+failure until the published versions carry it. Discovered while taking the
+dependency bump that WBU-12 rode on.
+
+discovered-from: WBU-12 (2026-10-29).

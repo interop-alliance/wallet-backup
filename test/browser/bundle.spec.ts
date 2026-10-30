@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { BUNDLE_ROLE } from '../../src/bundle/manifest.js'
+import { spaceMetadataFileName } from '@interop/space-archive'
 
 const SPACE_DOCUMENT = '{"id":"zBrowserSpace"}'
 
@@ -24,7 +25,7 @@ test('packs and reads an archive and a bundle in the browser', async ({
       spaceId: 'zBrowserSpace',
       entries: [
         {
-          name: '.space.meta.zBrowserSpace.json',
+          name: archive.spaceMetadataFileName('zBrowserSpace'),
           bytes: new TextEncoder().encode(spaceDocument)
         }
       ]
@@ -65,9 +66,11 @@ test('packs and reads an archive and a bundle in the browser', async ({
     }
   }, SPACE_DOCUMENT)
   expect(result.spaceId).toBe('zBrowserSpace')
-  expect(result.files['space/zBrowserSpace/.space.meta.zBrowserSpace.json']).toBe(
-    SPACE_DOCUMENT
-  )
+  expect(
+    result.files[
+      `space/zBrowserSpace/${spaceMetadataFileName('zBrowserSpace')}`
+    ]
+  ).toBe(SPACE_DOCUMENT)
   expect(result.ubcVersion).toBe('0.1')
   expect(result.roles).toEqual({
     'spaces/zBrowserSpace.tar': BUNDLE_ROLE.accountSpaceArchive
