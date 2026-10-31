@@ -13,7 +13,7 @@
  * transport.
  *
  * A chunked Resource in an encrypted app collection is reassembled by
- * was-client from the archive's chunk files. The first pass holds the few
+ * pws-client from the archive's chunk files. The first pass holds the few
  * hundred bytes of each chunked envelope. A second pass reads only this
  * collection's chunk directories, one at a time, and opens each envelope with
  * a chunk source over the chunk files of its directory. That relies on the
@@ -34,8 +34,8 @@ import {
   readSpaceArchive
 } from '@interop/space-archive'
 import { isJsonContentType } from '@interop/storage-core'
-import { blobBytes } from '@interop/was-client/edv/core'
-import type { ChunkSource } from '@interop/was-client/edv/core'
+import { blobBytes } from '@interop/pws-client/edv/core'
+import type { ChunkSource } from '@interop/pws-client/edv/core'
 import { ChunkedResourceUnsupportedError } from '../errors.js'
 import type { ByteSource } from '@interop/space-archive'
 import type { CollectionTally } from './report.js'
@@ -46,10 +46,10 @@ import {
 import type { AppCollectionResource, SinkOutcome } from './sink.js'
 
 /**
- * The name of the error was-client raises when a chunk source holds no chunk at
+ * The name of the error pws-client raises when a chunk source holds no chunk at
  * an index the envelope's sealed count asks for. The migration counts a stray
  * chunk directory under the same name. Matched by name, since the error is
- * minted in was-client and its class is not reachable from the offline entry.
+ * minted in pws-client and its class is not reachable from the offline entry.
  */
 const MISSING_CHUNK_ERROR_NAME = 'NotFoundError'
 
@@ -87,7 +87,7 @@ async function emptyChunkSource(): Promise<undefined> {
 
 /**
  * Turns one decrypted Resource into the body the sink is handed. A `Blob` is
- * read through was-client's `blobBytes`, since a React Native `Blob` has no
+ * read through pws-client's `blobBytes`, since a React Native `Blob` has no
  * `arrayBuffer()`.
  * @param plaintext {unknown}   what the cipher's `decrypt` resolved
  * @returns {Promise<ReadResult>}
@@ -240,7 +240,7 @@ function chunkSourceOver({
       throw signal.reason
     }
     const bytes = chunks.get(chunkIndex)
-    // was-client raises its missing-chunk error for an `undefined` answer.
+    // pws-client raises its missing-chunk error for an `undefined` answer.
     if (docId !== resourceId || bytes === undefined) {
       return undefined
     }

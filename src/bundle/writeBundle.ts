@@ -5,7 +5,7 @@
  * The bundle writer: one tar holding the manifest, the optional packed
  * backup credential, and one per-Space export archive per Space, verbatim. The
  * Space archives are copied byte for byte -- a bundle is a container, not a
- * re-encoding, so an archive a WAS server exported is the same bytes a reader
+ * re-encoding, so an archive a PWS server exported is the same bytes a reader
  * takes back out.
  */
 import * as tar from 'tar-stream'

@@ -9,7 +9,7 @@
  * bundle writers.
  *
  * Nothing here talks to a server. The roster and the collection descriptors
- * are assembled from was-client's epoch primitives directly, so a test can
+ * are assembled from pws-client's epoch primitives directly, so a test can
  * produce states the live ceremonies would not -- a torn cascade, a generation
  * whose wrap went missing -- which is exactly what the migration has to
  * survive.
@@ -22,17 +22,17 @@ import {
   toEpochConfigurationState,
   wrapEpochSecret,
   EDV_SCHEME_VERSION
-} from '@interop/was-client/edv/core'
-import type { RecipientPublicKey } from '@interop/was-client/edv/core'
-import { createEdvEncryption } from '@interop/was-client/edv'
-import { resourceUrl } from '@interop/was-client/paths'
+} from '@interop/pws-client/edv/core'
+import type { RecipientPublicKey } from '@interop/pws-client/edv/core'
+import { createEdvEncryption } from '@interop/pws-client/edv'
+import { resourceUrl } from '@interop/pws-client/paths'
 import type {
   ChunkedWrite,
   CodecRequestContext,
   CollectionEncryption,
   EncodedWrite,
   IndexSchema
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   mintUserKey,
   userKeyVaultKeys
@@ -69,7 +69,7 @@ export const FIXTURE_SPACE_ID = 'zMigrationSpace'
  * The fixture Space's URL, which the EDV codec needs only to label its ciphers
  * and address the chunk writes the fixture's in-memory request sink records.
  */
-const FIXTURE_SPACE_URL = `https://was.example/space/${FIXTURE_SPACE_ID}/`
+const FIXTURE_SPACE_URL = `https://pws.example/space/${FIXTURE_SPACE_ID}/`
 
 /**
  * The fixture bundle's provenance.
@@ -460,7 +460,7 @@ export function plaintextResources(resources: unknown[]): ArchiveFile[] {
 }
 
 /**
- * One binary Resource sealed by was-client's own write path, as the archive
+ * One binary Resource sealed by pws-client's own write path, as the archive
  * carries it: the envelope's representation file and, for a chunked write,
  * one chunk file per chunk in index order.
  */
@@ -476,10 +476,10 @@ export type SealedBinary = {
 export type BytesFile = { name: string; bytes: Uint8Array }
 
 /**
- * Seals binary Resources through was-client's EDV codec, over an in-memory
+ * Seals binary Resources through pws-client's EDV codec, over an in-memory
  * request context standing in for the server. A payload over `maxBlobBytes`
  * takes the codec's own chunked write, so the envelope and every chunk are
- * genuine: the sealed count, each chunk's `was` binding and its index-bound
+ * genuine: the sealed count, each chunk's `pws` binding and its index-bound
  * AAD are the writer's, not rebuilt here. The context never reaches the
  * network.
  *
@@ -585,7 +585,7 @@ export async function sealBinaryResources({
         throw err
       }
     })
-    // The codec addresses its writes with was-client's URL builders, so the
+    // The codec addresses its writes with pws-client's URL builders, so the
     // same builder yields the key the envelope was stored under.
     const prefix = resourceUrl({
       spaceUrl: FIXTURE_SPACE_URL,

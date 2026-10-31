@@ -6,7 +6,7 @@
  * URL: it builds a bundle whose one encrypted app collection holds a chunked
  * Resource, migrates it with a recovery code into a recording sink, and
  * returns what the sink saw. The fixture helpers are the node suite's own, so
- * the envelope and its chunks come from was-client's chunked write.
+ * the envelope and its chunks come from pws-client's chunked write.
  */
 import {
   generateRecoveryCode,

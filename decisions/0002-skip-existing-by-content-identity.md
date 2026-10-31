@@ -9,7 +9,7 @@
   wallet account, which must converge on a re-run and leave a populated target
   account's own rows intact.
 - Affects: `@interop/wallet-backup` (the sink port's outcome vocabulary and the
-  report); `@interop/was-client` (the write-by-id path for a chunk plan);
+  report); `@interop/pws-client` (the write-by-id path for a chunk plan);
   freewallet and dcw (each sink's existence check per collection).
 
 ## Context
@@ -38,7 +38,7 @@ and counts it. The identities are:
 
 A held id whose body differs from the archived row's is `conflicting`: the
 archived row lands nowhere, the held row is untouched, and the report names it.
-`contentCid` is the existing function from `@interop/was-client/sync`
+`contentCid` is the existing function from `@interop/pws-client/sync`
 (base64url-nopad SHA-256 over the JCS form); nothing is stored, and no row
 changes shape.
 
@@ -78,7 +78,7 @@ counted as not migrated.
 - On a remembered session the checks read the local replica, which can lag the
   remote; the migration awaits each synced collection's in-sync state before its
   first read.
-- The bytes rule needs a was-client write-by-id path that accepts a chunk plan.
+- The bytes rule needs a pws-client write-by-id path that accepts a chunk plan.
   It trusts the bundle's ids, so a doctored bundle's bytes at a genuine id count
   `conflicting` and leave the held copy in place. A second concurrent run could
   reap a stub the first is still filling, so a sink runs one migration at a

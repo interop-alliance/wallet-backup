@@ -188,7 +188,7 @@ downstream repos defer here):
   CHANGELOG carries a breaking entry, audit the ARCHITECTURE/AGENTS files of the
   consumers named in the affected contract's "Parties to this contract" registry
   (the AGENTS.md tables in app-connect-spec, encrypted-collections-spec, and the
-  WAS spec repo), and file roadmap items for what the audit finds. The cheap
+  PWS spec repo), and file roadmap items for what the audit finds. The cheap
   mechanism, as run 2026-08-11: parallel read-only agents, one per consumer
   repo, each checking that repo's ARCHITECTURE/AGENTS statements against its own
   code and the new contract -- a recipe, not an aspiration. A consumer with

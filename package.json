@@ -38,9 +38,9 @@
   "sideEffects": false,
   "dependencies": {
     "@interop/social-core": "^0.8.1",
-    "@interop/space-archive": "^0.11.1",
-    "@interop/storage-core": "^0.43.0",
-    "@interop/vh-resource-log": "^0.10.1",
+    "@interop/space-archive": "^0.12.0",
+    "@interop/storage-core": "^0.44.0",
+    "@interop/vh-resource-log": "^0.11.0",
     "@scure/base": "^2.4.0",
     "events": "^3.3.0",
     "tar-stream": "^3.2.0",
@@ -48,8 +48,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/wallet-core": "^0.111.0",
-    "@interop/was-client": "^0.103.0",
+    "@interop/pws-client": "^0.105.0",
+    "@interop/wallet-core": "^0.113.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",
@@ -65,8 +65,8 @@
     "vitest": "^4.1.7"
   },
   "peerDependencies": {
-    "@interop/wallet-core": ">=0.80.0 <1.0.0",
-    "@interop/was-client": ">=0.99.1 <1.0.0"
+    "@interop/pws-client": ">=0.105.0 <1.0.0",
+    "@interop/wallet-core": ">=0.112.0 <1.0.0"
   },
   "publishConfig": {
     "access": "public",

@@ -7,7 +7,7 @@
   port contract change, the reused error names, and the re-run identity rule for
   a bytes Resource, all for sign-off.
 - decision records extracted: 0002 amended (the bytes-Resource identity rule),
-  0003 (chunk reassembly lives in was-client)
+  0003 (chunk reassembly lives in pws-client)
 - review: adversarial pass 2026-09-28 (section 9). The forks in section 8 were
   settled 2026-09-28 (Q1 option (a), Q2 contiguity in the spec, `chunkSource`).
 
@@ -17,13 +17,13 @@ A backup bundle carries chunked Resources, but the migration walk refuses them.
 `archiveSurvey.ts:124` records each collection's chunk directories, and
 `collectionWalk.ts:199` skips the matching Resources. Each one is counted as
 unopenable under `ChunkedResourceUnsupportedError`. In practice these are the
-large binary Resources: a connected app's photos, PDFs and media. was-client
+large binary Resources: a connected app's photos, PDFs and media. pws-client
 writes any binary over 512 KiB (`DEFAULT_MAX_BLOB_BYTES`, `EdvCodec.ts:144`) as
 a chunked envelope in 1 MiB plaintext chunks. A user who restores through the
 migration walk loses them, and only a count in the report shows it.
 
 This design migrates chunked Resources in encrypted app collections. The walk
-reassembles each one through was-client's existing reader and hands the sink the
+reassembles each one through pws-client's existing reader and hands the sink the
 plaintext bytes under the Resource's sealed content type.
 
 The review found a related defect that ships today (section 9, R3). A small
@@ -37,7 +37,7 @@ is settled before either item is coded, and both use one rule.
 
 Out of scope:
 
-- Chunked Resources in plaintext collections. The WAS server stores chunks for
+- Chunked Resources in plaintext collections. The PWS server stores chunks for
   any Resource as opaque bytes, but the only defined chunk framing is the
   encrypted-collections chunked envelope (encrypted-collections-spec
   `spec.md:1172-1215`). A plaintext chunked Resource has no reassembly rule to
@@ -86,39 +86,39 @@ Out of scope:
   The sink's own copies (section 5, "freewallet sink") come on top of these.
 
 - **Invariant 4, "The codecs are isomorphic."** Touched. React Native's `Blob`
-  implements neither `text()` nor `arrayBuffer()` (was-client
-  `src/internal/blob.ts:4-14`), which is why was-client reads every `Blob`
+  implements neither `text()` nor `arrayBuffer()` (pws-client
+  `src/internal/blob.ts:4-14`), which is why pws-client reads every `Blob`
   through `blobBytes`. The walk reads the reassembled `Blob` through that
-  helper, which was-client exports from `./edv/core` for this (an in-house
+  helper, which pws-client exports from `./edv/core` for this (an in-house
   export change). A Chromium test cannot catch a regression here, so the walk
   has no `blob.arrayBuffer()` call at all. Reading is only half of it.
-  was-client builds the `Blob` from `Uint8Array` parts (`EdvCodec.ts:1679`,
+  pws-client builds the `Blob` from `Uint8Array` parts (`EdvCodec.ts:1679`,
   `:1737`), and stock React Native's `Blob` constructor is reported to refuse
   such parts. That claim is unverified here, and dcw has no `Blob` polyfill. If
-  it holds, every chunked and small binary Resource throws inside was-client on
-  dcw before `blobBytes` runs. This is a was-client isomorphism question as much
+  it holds, every chunked and small binary Resource throws inside pws-client on
+  dcw before `blobBytes` runs. This is a pws-client isomorphism question as much
   as this package's (section 8). Browser and Node `Blob` also lowercase the type
   and blank a non-ASCII one, so "the sealed content type" is the type as the
   platform's `Blob` normalizes it.
 - **Invariant 7, "The migration walk issues no request, and the package
   evaluates no transport module."** Upheld, with its wording amended. The chunk
   source is an in-memory function over bytes already read from the archive.
-  was-client wraps it in a subclass of edv-client's abstract `Transport`,
+  pws-client wraps it in a subclass of edv-client's abstract `Transport`,
   imported from `@interop/edv-client/core`, which `EdvCodec.ts:70` already
-  imports and whose `Transport.ts` has only type imports. `WasTransport` and
+  imports and whose `Transport.ts` has only type imports. `PwsTransport` and
   `transportFactory.js` stay out of the import graph, and the ciphers are still
-  built without a `spaceId`. The sentence "so was-client constructs no
+  built without a `spaceId`. The sentence "so pws-client constructs no
   transport" (`ARCHITECTURE.md:103-104`) becomes false, so it is reworded: the
   only transport the walk's graph reaches serves chunks from in-memory bytes.
   Two gaps in the probe are closed:
   - `test/probe/transportClosure.mjs` gains `/edv-client/dist/index.js` and
     `/edv-client/dist/HttpsTransport.js` in `FORBIDDEN_MODULES`. Today an import
     of the edv-client root passes it.
-  - The walk never imports `NotFoundError` from the was-client root, which the
-    probe forbids. The missing-chunk error is raised inside was-client (section
+  - The walk never imports `NotFoundError` from the pws-client root, which the
+    probe forbids. The missing-chunk error is raised inside pws-client (section
     5).
 
-  The probe runs against the installed was-client, so it covers the new code
+  The probe runs against the installed pws-client, so it covers the new code
   only once the devDependency moves to the release that carries it (section 5,
   "Versions").
 
@@ -144,7 +144,7 @@ Out of scope:
     yields no chunk file is opened at the end of the pass with an empty source,
     so it is counted too.
   - `QuotaExceededError` from the sink still ends the walk only if the sink
-    surfaces that name. was-client's chunked write wraps a 507 on a chunk or on
+    surfaces that name. pws-client's chunked write wraps a 507 on a chunk or on
     the final envelope update in `EncryptionError`, with the 507 only as its
     `cause` (`EdvCodec.ts:833-857`). Section 5 ("freewallet sink") requires the
     sink to rethrow the quota error under its own name.
@@ -154,7 +154,7 @@ Out of scope:
   `appRowIdentity` covers only a JSON payload (`storageManager.ts:372-378`), and
   the encrypted write path mints a fresh id per write. A fifth identity rule is
   needed (section 8, Q1). 0002 is amended in place with it.
-- **was-client's chunked-read checks** (`EdvCodec#readChunked`,
+- **pws-client's chunked-read checks** (`EdvCodec#readChunked`,
   `EdvCodec.ts:970`). Leaned on, with a gap stated plainly. The chunk count is
   the sealed one, and the source is asked for chunks of the envelope's
   AEAD-bound `was.resource` id. The source receives that `docId`, and the walk
@@ -164,7 +164,7 @@ Out of scope:
   but `getStream` and minimal-cipher's `DecryptTransformer` accept each chunk
   under its own header and its own wrapped key. So a genuine chunk of Resource
   B, placed in A's directory, decrypts as part of A. Section 5 adds the
-  read-side check in was-client.
+  read-side check in pws-client.
 - **space-archive's pack order.** Leaned on. `packDirectory`
   (`space-archive/src/archive/exportTar.ts:143-170`) emits a chunk directory's
   files together, straight after the directory entry. The teaching server's
@@ -184,7 +184,7 @@ Checked and untouched: invariants 1 and 2 (the walk only reads archive bytes),
 
 ## 3. Consumer enumeration
 
-Produced by grepping wallet-backup, was-client, was-react, was-sync, freewallet
+Produced by grepping wallet-backup, pws-client, pws-react, pws-sync, freewallet
 and dcw for `ChunkedResourceUnsupportedError`, `chunked`,
 `AppCollectionResource`, `importAppCollectionResource`, `readChunked`,
 `DocCipher`, `ResourceCodec`, `openResource` and `onProgress`, and by reading
@@ -209,7 +209,7 @@ wallet-backup:
   now. Its JSDoc at `:19` ("the Resource is chunked") is updated.
 - README.md -- "An encrypted collection's Resource arrives decrypted as `json`,
   under `application/json`" is updated with the sink contract.
-- `package.json` -- the was-client devDependency (`^0.77.0`) and peer range
+- `package.json` -- the pws-client devDependency (`^0.77.0`) and peer range
   (`>=0.73.0 <1.0.0`) move to the release that carries the chunk source (section
   5, "Versions").
 - `test/probe/transportClosure.mjs` -- gains the two edv-client entries (section
@@ -221,7 +221,7 @@ wallet-backup:
 - `test/browser/` -- `bundle.spec.ts` only packs and reads, and never runs the
   walk. The browser case is a new migration spec (section 7).
 
-was-client:
+pws-client:
 
 - `src/edv/docCipher.ts:382` `EdvDocCipher.decrypt`, `EdvCodec#decode` and
   `#readChunked` -- gain the chunk source option (section 5).
@@ -237,17 +237,17 @@ was-client:
 
 Other repos:
 
-- was-react `src/storage/docCipher.ts:68` derives its options from
+- pws-react `src/storage/docCipher.ts:68` derives its options from
   `Parameters<ClientDocCipher['decrypt']>[0]` and destructures only
   `{ id, envelope }` (`:127`). Unaffected while the option stays off the shared
   `DocCipher` interface.
-- was-sync `conflictHandler.ts:183` exports
+- pws-sync `conflictHandler.ts:183` exports
   `ConflictDecrypt = DocCipher['decrypt']`. Unaffected for the same reason.
 - freewallet `src/stores/storageManager.ts:6403-6481`
   `importAppCollectionResource` -- changed. It refuses a bytes body for an
   encrypted collection today (`:6424-6427`). Its encrypted branch re-seals
   through a context-less `DocCipher.encrypt` under the default `'content'` id
-  derivation (`:6227-6233`, `:6457-6464`), and was-client refuses a chunked
+  derivation (`:6227-6233`, `:6457-6464`), and pws-client refuses a chunked
   write on that route (`docCipher.ts:318-326`, `EdvCodec.ts:584-596`). A write
   by id refuses a chunk plan too (`src/internal/write.ts:297-309`). So the sink
   needs a write route the draft did not have (section 8, Q1).
@@ -274,7 +274,7 @@ Other repos:
   DCW-80's acceptance ("report matches freewallet's for the same bundle")
   already diverges on app collections, and this widens that gap. A note goes on
   DCW-80.
-- portable-wallet-profile-spec and was-teaching-server -- parties to
+- portable-wallet-profile-spec and web-spaces-server -- parties to
   space-archive's layout contract, reached through the contiguity dependency
   (section 8, Q2).
 
@@ -290,14 +290,14 @@ Rows are existing flows and states. Columns are what this design introduces.
 | Resource under a generation this secret cannot open | fine: the envelope fails in `openResource` with `KeyUnwrapError` before any chunk is read (`EdvCodec.ts:917-941`)                                                                                                                                                               | fine                                               | not reached                                                      |
 | Chunk sealed to another epoch                       | changed: the chunk's `was.epoch` differs from the envelope's, so the chunk-binding check refuses it under `EncryptionError`. `KeyMissError` is reached only by a hand-forged header                                                                                             | not reached                                        | same cell                                                        |
 | Chunk corrupted, or moved to another index          | changed: the AEAD or the index-bound AAD fails in minimal-cipher. The Resource counts under `DataError` where the platform decrypt returns null, and under a plain `Error` in Node, whose AEAD throw minimal-cipher does not rename (`DecryptTransformer.ts:64-68`, `:114-119`) | not reached                                        | same cell                                                        |
-| Chunk from another Resource in this directory       | changed: refused by the new chunk-binding check in was-client, counted under `EncryptionError`                                                                                                                                                                                  | not reached                                        | same cell                                                        |
+| Chunk from another Resource in this directory       | changed: refused by the new chunk-binding check in pws-client, counted under `EncryptionError`                                                                                                                                                                                  | not reached                                        | same cell                                                        |
 | Torn source write: pending stub, partial chunk dir  | changed: the envelope records no sealed count, and the Resource counts under `EncryptionError` (`EdvCodec.ts:976-982`) before any chunk is read. With an empty directory it is opened at pass end, with the same result                                                         | fine: refused as today                             | same cell                                                        |
 | Chunk dir beside a non-chunked envelope             | changed: decrypt returns `Json` or a small `Blob`, and the walk routes it by the result type (`json` or `bytes`). The directory is ignored                                                                                                                                      | fine: refused as today                             | not reached                                                      |
 | Chunked envelope, no chunk dir in the archive       | changed: every Resource of an encrypted app collection gets a chunk source, empty when no directory exists, so it counts under `NotFoundError`                                                                                                                                  | not reached                                        | same cell                                                        |
 | Stray chunk dir, no representation                  | fine: counted unopenable under `NotFoundError`, one per directory                                                                                                                                                                                                               | fine: counted as today                             | same cell                                                        |
 | Chunk file unparseable, sidecar, or duplicate idx   | changed: only `representation` files with a valid index are buffered. Sidecars and bad names are skipped. A later duplicate index is skipped                                                                                                                                    | not reached                                        | a gap left by a skipped file counts under `NotFoundError`        |
 | Abort signal                                        | changed: checked before each chunked Resource and inside the chunk source on each call. The open catch rethrows when the signal is aborted, so the walk throws the signal's reason and does not count the Resource. A sink's upload in progress is not interrupted (no signal)  | fine                                               | fine                                                             |
-| `QuotaExceededError` from the sink                  | changed: ends the walk only if the sink rethrows the 507 under that name. was-client wraps it in `EncryptionError` today (section 5)                                                                                                                                            | fine                                               | not reached                                                      |
+| `QuotaExceededError` from the sink                  | changed: ends the walk only if the sink rethrows the 507 under that name. pws-client wraps it in `EncryptionError` today (section 5)                                                                                                                                            | fine                                               | not reached                                                      |
 | Ten consecutive sink failures                       | fine: chunked Resources count toward the run like any other                                                                                                                                                                                                                     | fine                                               | fine: unopenable Resources do not count toward the run, as today |
 | Walk stops in the first pass                        | changed: chunked envelopes not yet attempted are not counted, like ordinary Resources after a stop. The report's stop names why                                                                                                                                                 | fine: counted upfront as today                     | not reached                                                      |
 | `onProgress` index                                  | changed: chunked Resources are reported after the collection's other Resources, in chunk-directory order. `onProgress` carries no total, so nothing drifts                                                                                                                      | fine: counted first, as today                      | same as its column                                               |
@@ -307,7 +307,7 @@ Rows are existing flows and states. Columns are what this design introduces.
 
 ## 5. Design
 
-### was-client
+### pws-client
 
 `EdvDocCipher.decrypt` takes one new option beside `context`:
 
@@ -330,7 +330,7 @@ async decrypt({
 
 The option sits on `EdvDocCipher` and the EDV codec only. The shared `DocCipher`
 interface (`src/sync/types.ts`) and `ResourceCodec.decode` keep their shape, so
-was-react, was-sync, `plaintextCipher.ts` and `refreshingDocCipher.ts` see no
+pws-react, pws-sync, `plaintextCipher.ts` and `refreshingDocCipher.ts` see no
 change. The EDV doc cipher holds its codec as `EdvCodec`, not as
 `ResourceCodec`, to forward the option. It is named `chunkSource` so it does not
 collide with `#readChunked`'s `chunks` parameter, which is the sealed count
@@ -339,8 +339,8 @@ collide with `#readChunked`'s `chunks` parameter, which is the sealed count
 `codec.decode` forwards `chunkSource` to `#readChunked`. There, when
 `chunkSource` is given, the codec builds a local `Transport` subclass. Its
 `getChunk({ docId, chunkIndex })` calls `chunkSource({ docId, chunkIndex })` and
-throws was-client's `NotFoundError` when the source returns `undefined`, the
-name `EdvClientCore` expects (`WasTransport.ts:538-543`). The codec passes it to
+throws pws-client's `NotFoundError` when the source returns `undefined`, the
+name `EdvClientCore` expects (`PwsTransport.ts:538-543`). The codec passes it to
 `EdvClientCore.getStream` in place of `#transportFor(context)`. The `docId` is
 the AEAD-bound id `#readChunked` already uses. The existing
 `context === undefined` refusal becomes a refusal when neither is given. Passing
@@ -354,7 +354,7 @@ since the writer already seals the binding into every chunk
 
 `blobBytes` (`src/internal/blob.ts:123`) is exported from `./edv/core`.
 
-The option lives in was-client, not here. The package's rule is that reassembly
+The option lives in pws-client, not here. The package's rule is that reassembly
 and its checks belong to the encrypted-collections reference implementation.
 
 ### wallet-backup walk
@@ -423,7 +423,7 @@ bundle is the trust root for both. Sealing needs no secret, since every write
 seals a fresh key to the write epoch's public key (`docCipher.ts:407-409`).
 Whoever built the bundle chooses every sealed value: the count, the content
 type, the encoding. The sink receives the sealed content type as an opaque label
-and must not interpret it. was-client's write path treats `Uint8Array` data as
+and must not interpret it. pws-client's write path treats `Uint8Array` data as
 binary whatever the type says (`internal/content.ts:189-194`).
 
 ### Sink port contract change
@@ -447,7 +447,7 @@ that recognizes it on a re-run. Neither exists (section 3). Q1 settled both
 (section 8): a bytes Resource in an encrypted collection is written at its
 archived `resourceId`, and that id is its identity.
 
-- The write goes through a random-id encrypted handle, with a new was-client
+- The write goes through a random-id encrypted handle, with a new pws-client
   write-by-id path that accepts a chunk plan (`src/internal/write.ts:297-309`
   refuses one today). A small bytes Resource (WBU-7) takes the same route, so
   both cases share one identity rule. An encrypted JSON Resource keeps its
@@ -467,18 +467,18 @@ archived `resourceId`, and that id is its identity.
   so debris is bounded to known ids.
 - A second concurrent run could reap a stub the first run is still filling. The
   sink runs one migration at a time.
-- A 507 during a chunked write surfaces as `QuotaExceededError`. was-client's
+- A 507 during a chunked write surfaces as `QuotaExceededError`. pws-client's
   `#chunkedWriteFailed` rethrows the quota error itself after cleanup, which
   also fixes the misleading "chunks were not written" message after a 507 on the
   final envelope update.
 
 ### Versions
 
-The chunk source ships in a new was-client release. wallet-backup's
+The chunk source ships in a new pws-client release. wallet-backup's
 devDependency and peer range move to it, and the CHANGELOG names that as a
-breaking change. A host on an older was-client ignores the option when it
+breaking change. A host on an older pws-client ignores the option when it
 destructures its arguments, and every chunked Resource would count under
-`EncryptionError` with no pointer to the version. freewallet bumps was-client
+`EncryptionError` with no pointer to the version. freewallet bumps pws-client
 with it. wallet-core's peer range `>=0.78.0` is compatible.
 
 ### Wire-level conventions
@@ -491,9 +491,9 @@ No new permanent wire artifact. For sign-off:
 - The re-run identity rule for a bytes Resource in an encrypted collection (Q1).
   It amends decision 0002.
 - The report causes a chunked Resource can now carry. All are existing names:
-  - `NotFoundError` (was-client) for a missing chunk, a missing chunk directory,
+  - `NotFoundError` (pws-client) for a missing chunk, a missing chunk directory,
     or a stray directory;
-  - `EncryptionError` (was-client) for a pending stub or a chunk-binding
+  - `EncryptionError` (pws-client) for a pending stub or a chunk-binding
     mismatch, which includes a chunk sealed to another epoch;
   - `DataError` (minimal-cipher) for a corrupted chunk or one moved to another
     index, where the platform decrypt returns null. In Node the same failure
@@ -507,27 +507,27 @@ No new permanent wire artifact. For sign-off:
   that name and does not rename them.
 
 - `ValidationError` for a `decrypt` given both `context` and `chunkSource`.
-- The `chunkSource` option name on was-client's `decrypt` is a TypeScript API
+- The `chunkSource` option name on pws-client's `decrypt` is a TypeScript API
   name, not a wire artifact. Settled 2026-09-28 (section 8).
 
 ## 6. Alternatives rejected
 
 - **Stream the Resource to the sink.** A `ReadableStream` body in
   `AppCollectionResource` would keep invariant 3 as stated, but it buys nothing
-  today. was-client's reader already buffers the decrypt stream into a `Blob`
-  (`EdvCodec.ts:1010-1020`), was-client's `put` takes no stream, and
+  today. pws-client's reader already buffers the decrypt stream into a `Blob`
+  (`EdvCodec.ts:1010-1020`), pws-client's `put` takes no stream, and
   freewallet's re-run comparison reads the held copy whole. It would also change
   the port's shape for every sink, where the chosen design changes only its
-  meaning. Revisit when was-client's read and write paths both stream.
+  meaning. Revisit when pws-client's read and write paths both stream.
 - **Reassemble in wallet-backup, or reuse did-cli-typescript's
   `decryptChunks`.** did-cli's function (`src/edv/stream.ts:148`) is a local
   copy of edv-client's `getStream`. It calls `minimal-cipher` directly and skips
-  was-client's sealed-count and bound-id checks. Doing the same here would
+  pws-client's sealed-count and bound-id checks. Doing the same here would
   duplicate upstream logic and lose those checks. Do-not-reopen.
-- **A shim request context instead of a was-client change.** A fake
+- **A shim request context instead of a pws-client change.** A fake
   `context.request` could serve `.../chunks/<n>` from the archive to a cipher
-  built with a `spaceId`. That loads `WasTransport` into the walk's import
-  graph, breaking invariant 7, and ties the walk to WAS URL paths.
+  built with a `spaceId`. That loads `PwsTransport` into the walk's import
+  graph, breaking invariant 7, and ties the walk to PWS URL paths.
   Do-not-reopen.
 - **Collect chunk files in the survey pass.** The survey would hold every
   chunked Resource's bytes of every collection at once, where the chosen design
@@ -537,15 +537,15 @@ No new permanent wire artifact. For sign-off:
   times the archive size. A wallet with hundreds of photos would re-parse a
   large archive hundreds of times.
 - **Throw a local error named `NotFoundError` from the walk's chunk source.** It
-  would copy an upstream error contract. was-client's local transport raises the
+  would copy an upstream error contract. pws-client's local transport raises the
   real one when the source returns `undefined`.
 
 ## 7. Test plan
 
 Node suite (`test/node/migrate.test.ts`). Fixtures are built through
-was-client's own chunked write: an `EdvCodec` from `./edv/core` built with a
+pws-client's own chunked write: an `EdvCodec` from `./edv/core` built with a
 test `transportFactory` (`CodecTransportFactory`, `EdvCodec.ts:167-170`) that
-returns an in-memory `WasTransport`-shaped object. The envelopes and chunk files
+returns an in-memory `PwsTransport`-shaped object. The envelopes and chunk files
 are then genuine, the private `was` binding is not rebuilt by hand, and the
 suite's throwing `fetch` stays installed:
 
@@ -580,9 +580,9 @@ suite's throwing `fetch` stays installed:
   `migrateBundle` rejects.
 
 `pnpm run test:dist` (`test/probe/transportClosure.mjs`), with the two new
-edv-client entries and the devDependency on the new was-client, stays green.
+edv-client entries and the devDependency on the new pws-client, stays green.
 
-was-client gains unit tests for the `chunkSource` option: it reassembles, it
+pws-client gains unit tests for the `chunkSource` option: it reassembles, it
 keeps the sealed-count and bound-id refusals, it refuses a chunk whose binding
 differs from the envelope's, it raises `NotFoundError` for a missing index, and
 it refuses `chunkSource` with `context`.
@@ -603,7 +603,7 @@ through `blobBytes` (section 2, invariant 4).
   Resource.** Owner: core contributors, before approval. The import cipher uses
   `idDerivation: 'content'`, which cannot chunk. The options:
   - (a) Write at the archived `resourceId` through a random-id encrypted handle,
-    with a new was-client write-by-id path for chunked plans. Identity is the
+    with a new pws-client write-by-id path for chunked plans. Identity is the
     archived id, as for plaintext bytes Resources. A 412 reads the held copy and
     compares bytes. A killed write leaves a pending stub at that id, so every
     later run gets a 412 and fails to read it. The re-run must detect a pending
@@ -617,7 +617,7 @@ through `blobBytes` (section 2, invariant 4).
   WBU-7 needs the same rule for small binary Resources, so one answer serves
   both. Reviewer lean: (a). It matches the plaintext bytes path, it keeps the
   archived id as the identity decision 0002 already uses there, and it bounds
-  torn-state debris to one known id. It costs a was-client write path.
+  torn-state debris to one known id. It costs a pws-client write path.
 
   Settled 2026-09-28: (a). Section 5 ("freewallet sink") states the route.
 
@@ -636,9 +636,9 @@ through `blobBytes` (section 2, invariant 4).
   core contributors, with the sign-off list. Settled 2026-09-28: `chunkSource`.
 - The memory cost of the largest realistic chunked Resource on dcw, and whether
   React Native's `Blob` constructor accepts `Uint8Array` parts at all (section
-  2, invariant 4). If it does not, was-client's decrypt of any binary Resource
+  2, invariant 4). If it does not, pws-client's decrypt of any binary Resource
   fails on dcw. Owner: dcw, when DCW-80 or its successor adds `appCollections`,
-  with was-client for the constructor half. Answer lands in that item.
+  with pws-client for the constructor half. Answer lands in that item.
 
 ## 9. Review log
 
@@ -660,13 +660,13 @@ findings, most severe first, and where each landed:
 - R4. A chunk directory beside a non-chunked envelope crashed the walk without a
   report. Landed in section 5, step 4, and section 4.
 - R5. The walk cannot import `NotFoundError` without breaking invariant 7.
-  Landed in section 5 (was-client raises it) and section 6.
+  Landed in section 5 (pws-client raises it) and section 6.
 - R6. `blob.arrayBuffer()` is missing on React Native (invariant 4). Landed in
   section 2 and section 5, step 4.
 - R7. A 507 during a chunked write became `EncryptionError`, so quota no longer
   ended the walk. Landed in section 2 (invariant 10) and section 5.
 - R8. Chunks are not bound to their envelope on read. Landed in section 2 and
-  the was-client subsection (the chunk-binding check).
+  the pws-client subsection (the chunk-binding check).
 - R9. The memory count ("at most two copies") was wrong. Landed in section 2.
 - R10. The missing-directory case in step 5 could not happen, and a missing
   directory counted under `EncryptionError`. A stray directory dropped out of
@@ -675,10 +675,10 @@ findings, most severe first, and where each landed:
   names. Landed in section 5, step 2.
 - R12. A split directory's second fragment was unspecified, and the split test
   used the wrong shape. Landed in section 5, step 3, section 4 and section 7.
-- R13. The was-client version pins let an old host mis-report every chunked
+- R13. The pws-client version pins let an old host mis-report every chunked
   Resource. Landed in section 5 ("Versions").
 - R14. The option's placement on shared interfaces (`DocCipher`,
-  `ResourceCodec`), with was-react and was-sync behind them. Landed in sections
+  `ResourceCodec`), with pws-react and pws-sync behind them. Landed in sections
   3 and 5.
 - R15. Unlisted consumers: freewallet's cause map and locale strings, stale
   JSDoc and README text, the probe's edv-client gap, the profile spec and the

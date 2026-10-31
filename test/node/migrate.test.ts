@@ -30,14 +30,14 @@ import {
 import {
   EDV_SCHEME_VERSION,
   EPOCH_CONFIGURATION_STATE_TYPE
-} from '@interop/was-client/edv/core'
+} from '@interop/pws-client/edv/core'
 import type {
   ChunkSource,
   EdvDocCipher,
   RecipientPublicKey
-} from '@interop/was-client/edv/core'
+} from '@interop/pws-client/edv/core'
 import type { UserKey } from '@interop/wallet-core/keys/userKey'
-import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
+import type { CollectionEncryption, IndexSchema } from '@interop/pws-client'
 import type { ArchiveEntry, ArchiveFile } from '@interop/space-archive'
 import {
   collectBytes,
@@ -1025,7 +1025,7 @@ describe('migrateBundle', () => {
       tally({ unopenable: 3, unopenableCauses: { IntegrityError: 3 } })
     )
     // The newest generation's cipher unwraps its write epoch at construction
-    // and the damaged epoch once, on the first Resource. was-client remembers
+    // and the damaged epoch once, on the first Resource. pws-client remembers
     // the failed check, so the other two Resources are counted without another
     // unwrap. The older generation only ever unwraps its write epoch.
     expect(derivationsByGeneration.get(newer!.id)).toBe(2)
@@ -2672,7 +2672,7 @@ describe('migrateBundle', () => {
             })
           ]
         })
-        // The swapped chunks fail their index-bound AAD. was-client maps the
+        // The swapped chunks fail their index-bound AAD. pws-client maps the
         // cipher's `IntegrityError` to `EncryptionError` on the chunked read
         // path. The report carries the name alone, so the cause is not
         // visible here.
@@ -2872,7 +2872,7 @@ describe('migrateBundle', () => {
             ]
           })) as unknown as AsyncIterable<Uint8Array>
         )
-        // Stands in for was-client's reader: it asks for chunks in order,
+        // Stands in for pws-client's reader: it asks for chunks in order,
         // and wraps a source failure in an error of its own.
         const cipher = {
           async decrypt({

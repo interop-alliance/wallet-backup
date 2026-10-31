@@ -13,20 +13,20 @@
 - Affects: `@interop/wallet-backup` (the bundle reader, the per-Space archive
   codec, the secret-to-user-key derivation, the collection pass, the sink port,
   the report); freewallet and dcw (each implements the sink over its own
-  stores); was-teaching-server (both backends write the per-Space archive
-  through this package's writer).
+  stores); web-spaces-server (both backends write the per-Space archive through
+  this package's writer).
 
 ## Context
 
 A bundle is tar-in-tar: an outer archive with a `manifest.yml` in the per-Space
 archive manifest's dialect and one per-Space export archive per Space, verbatim
-server bytes. The migration reads
-the account Space archive, derives the old user key from an old secret through
-the archived user-key roster, decrypts each standard collection's envelopes, and
-writes plaintext rows into the new account. Two wallets share the ceremonies
-(`@interop/wallet-core`) and both need this. The rows can number in the
-thousands, the Argon2id derivation holds a 64MiB working set, and every existing
-tar reader in the wallets buffers the whole file, so memory shapes the API.
+server bytes. The migration reads the account Space archive, derives the old
+user key from an old secret through the archived user-key roster, decrypts each
+standard collection's envelopes, and writes plaintext rows into the new account.
+Two wallets share the ceremonies (`@interop/wallet-core`) and both need this.
+The rows can number in the thousands, the Argon2id derivation holds a 64MiB
+working set, and every existing tar reader in the wallets buffers the whole
+file, so memory shapes the API.
 
 The per-Space archive layout was, at the time, the teaching server's private
 file-name codec with no spec text, re-derived separately by its Postgres
@@ -64,7 +64,7 @@ the parties table with a counterpart test on each side.
   come for free, but each wallet then computes its own report, and the report
   feeds a stored activity row whose counts must agree across wallets.
 - The archive codec as spec text alone, or as a server AGENTS.md contract with a
-  counterpart test, or as a `@interop/was-client` subpath. The first pins
+  counterpart test, or as a `@interop/pws-client` subpath. The first pins
   nothing until a second server exists, the second pins by test and not by text,
   and the third moves a server-side concern into a client library.
 
@@ -95,7 +95,7 @@ for the outer tar codec, the manifest parse and archive-role vocabulary, the
 packed backup credential's reading and unsealing, the derivation, the collection
 pass, and the report. Only the per-Space archive reader and writer moved,
 because the server needed only the codec and was installing the migration's
-whole dependency set (`@interop/wallet-core`, `@interop/was-client`,
+whole dependency set (`@interop/wallet-core`, `@interop/pws-client`,
 `@interop/social-core`, `@interop/vh-resource-log`, Argon2) through this package
 to get it.
 

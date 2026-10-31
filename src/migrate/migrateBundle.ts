@@ -27,7 +27,7 @@
  * garbage collection rather than wiped.
  */
 import { WALLET_ACTIVITY_COLLECTION } from '@interop/wallet-core/space/collections'
-import type { EdvDocCipher } from '@interop/was-client/edv/core'
+import type { EdvDocCipher } from '@interop/pws-client/edv/core'
 import { accountSpaceArchive, readBundle } from '../bundle/readBundle.js'
 import { bundleManifestSummary } from '../bundle/manifest.js'
 import { BundleInvalidError, CollectionLogUnreadableError } from '../errors.js'

@@ -33,7 +33,7 @@ import {
   recordEnvelopeId,
   recordSealCipher
 } from '@interop/wallet-core/keyring/recordEnvelope'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { BundleInvalidError } from '../errors.js'
 import { standingAgentsFromSecret } from '../standingAgents.js'
 import type { StandingAgents } from '../standingAgents.js'
@@ -260,7 +260,7 @@ function parseSealedBackupCredential(
 /**
  * Reads a packed backup credential back to its 32 secret bytes. A plain
  * document yields its secret directly. A sealed one is opened with the export
- * passphrase it was sealed under, and refuses under was-client's
+ * passphrase it was sealed under, and refuses under pws-client's
  * `KeyUnwrapError` for any other passphrase: a different passphrase derives a
  * different key-agreement key, which the sealed epoch has no wrap for. A
  * secret that is not base64url-nopad, or not 32 bytes, is refused with

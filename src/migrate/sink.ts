@@ -28,7 +28,7 @@ import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
-import type { CollectionGenerator, IndexSchema } from '@interop/was-client'
+import type { CollectionGenerator, IndexSchema } from '@interop/pws-client'
 
 /**
  * What one sink call did with the Resource it was handed. `skipped` is the
@@ -165,7 +165,7 @@ export const MAX_CONSECUTIVE_FAILURES = 10
 
 /**
  * The error name a sink throw must carry to stop the whole migration rather
- * than fail one Resource: was-client's 507, a wall that every later Resource
+ * than fail one Resource: pws-client's 507, a wall that every later Resource
  * would hit too. Matched by name, never by `instanceof`, since the error is
  * minted in another package.
  */

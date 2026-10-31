@@ -180,7 +180,7 @@ describe('packBackupCredential and unpackBackupCredential', () => {
       { ...jwe, ciphertext: flipFirstByte(jwe.ciphertext) },
       { ...jwe, tag: flipFirstByte(jwe.tag) }
     ]
-    // was-client's `IntegrityError`: the envelope opens to the right key but
+    // pws-client's `IntegrityError`: the envelope opens to the right key but
     // its authentication tag no longer matches.
     for (const edited of tampered) {
       const document = {

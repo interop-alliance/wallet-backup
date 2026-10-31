@@ -20,9 +20,9 @@
  */
 import { userKeyVaultKeys } from '@interop/wallet-core/keys/userKey'
 import { unwrapUserKeyGenerations } from '@interop/wallet-core/keys/userKeyGenerations'
-import { createEdvDocCipher } from '@interop/was-client/edv/core'
-import type { EdvDocCipher } from '@interop/was-client/edv/core'
-import type { CollectionEncryption, IndexSchema } from '@interop/was-client'
+import { createEdvDocCipher } from '@interop/pws-client/edv/core'
+import type { EdvDocCipher } from '@interop/pws-client/edv/core'
+import type { CollectionEncryption, IndexSchema } from '@interop/pws-client'
 import { BundleRecipientMissingError } from '../errors.js'
 import type { RecipientKeyAgreementKey } from './secretToRecipient.js'
 

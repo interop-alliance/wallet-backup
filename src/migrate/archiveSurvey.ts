@@ -27,7 +27,7 @@ import {
   readSpaceArchive
 } from '@interop/space-archive'
 import type { ByteSource } from '@interop/space-archive'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 
 /**
  * The collection ids of the wallet Space's own layout: the synced standard

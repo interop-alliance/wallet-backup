@@ -3,7 +3,7 @@
 nextAvailableId: 14
 
 Status as of 2026-09-18. Uses the formalized item structure shared with the
-freewallet and was-teaching-server roadmaps.
+freewallet and web-spaces-server roadmaps.
 
 Scope: open work items only. This document tracks the **remaining** items;
 completed items move verbatim to [archived-roadmap.md](archived-roadmap.md) as

@@ -1,5 +1,18 @@
 # @interop/wallet-backup Changelog
 
+## 0.10.0 - TBD
+
+### Changed
+
+- Breaking: the `@interop/was-client` peer dependency is renamed to
+  `@interop/pws-client` (`>=0.105.0 <1.0.0`), following the package's own
+  rename. Hosts install `@interop/pws-client` in its place. pws-client 0.104.0
+  and 0.105.0 change what sealed Resources carry (the `pws` JWE header
+  parameter, the `PwsEpochConfiguration` descriptor state type), so a bundle
+  written under an earlier client no longer opens through this version.
+- Requires `@interop/storage-core` 0.44.0, `@interop/vh-resource-log` 0.11.0 and
+  `@interop/wallet-core` 0.112.0.
+
 ## 0.9.0 - 2026-10-30
 
 ### Changed

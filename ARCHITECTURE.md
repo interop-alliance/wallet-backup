@@ -94,7 +94,7 @@ The dependency direction inside this package is one way: `migrate/` reads
    declaring a package that provides it outside Node. A bundler resolves that
    call to the `events` package declared here. Without it the browser spec fails
    inside `tar-stream`. The migration reads a decrypted `Blob` through
-   was-client's `blobBytes` and never calls `blob.arrayBuffer()`, which React
+   pws-client's `blobBytes` and never calls `blob.arrayBuffer()`, which React
    Native's `Blob` lacks. A second Playwright spec runs the migration over a
    chunked Resource, so the `Blob` path runs in Chromium; React Native is
    covered only by that reading rule.
@@ -118,24 +118,24 @@ The dependency direction inside this package is one way: `migrate/` reads
 7. **The migration issues no request, and the package evaluates no transport
    module.** The migration builds its ciphers without a `spaceId` and reads
    every descriptor out of the archive. The only transport its graph reaches is
-   the one was-client builds around the migration's chunk source, which serves
+   the one pws-client builds around the migration's chunk source, which serves
    chunks from bytes already read from the archive (see
-   `decisions/0003-chunk-reassembly-lives-in-was-client.md`). The migration
-   takes was-client's missing-chunk error by name and never imports it. A bundle
+   `decisions/0003-chunk-reassembly-lives-in-pws-client.md`). The migration
+   takes pws-client's missing-chunk error by name and never imports it. A bundle
    migrates with the old account gone and the old server unreachable. The node
    suites install a `fetch` that throws, so a migration that reached the network
    would fail rather than pass. The import graph keeps the same promise: the
-   ciphers and epoch primitives come from `@interop/was-client/edv/core`, and
+   ciphers and epoch primitives come from `@interop/pws-client/edv/core`, and
    every wallet-core derivation and collection name comes from a leaf entry
    (`keyring/kdf`, `keyring/recordEnvelope`, `keys/userKey`,
    `keys/userKeyGenerations`, `unlock/standingClient`, `recovery/recoveryCode`,
    `space/collections`) rather than a module barrel.
    `test/probe/transportClosure.mjs` imports the built package under a Node
-   resolve hook and fails if any resolved module is a was-client module that
-   talks to a server, was-client's `./edv` or root barrel, edv-client's root
+   resolve hook and fails if any resolved module is a pws-client module that
+   talks to a server, pws-client's `./edv` or root barrel, edv-client's root
    barrel or `HttpsTransport`, or wallet-core's `./space` barrel, `resourceLog/`
    or `clientAnnex/`. It runs as `pnpm run test:dist`. One reach is allowed by
-   design: the client derivations load `@interop/was-client/identity`, which
+   design: the client derivations load `@interop/pws-client/identity`, which
    brings the zcap and HTTP signing packages, wallet-core's own recorded
    allowance for its leaves.
 8. **Key material does not outlive the migration, as far as it can be
@@ -201,18 +201,18 @@ The dependency direction inside this package is one way: `migrate/` reads
   spec change first, then a change to both, and to this package as a consumer of
   the reader and writer. See that package's AGENTS.md for its own parties table.
 - Chunk reassembly and its checks (the sealed count, the bound id, each chunk's
-  binding) belong to `@interop/was-client`. The migration hands it a chunk
+  binding) belong to `@interop/pws-client`. The migration hands it a chunk
   source over the archive's chunk files and does nothing else with their bytes.
-  See `decisions/0003-chunk-reassembly-lives-in-was-client.md`.
+  See `decisions/0003-chunk-reassembly-lives-in-pws-client.md`.
 - Key derivation, record sealing, roster and epoch handling belong to
-  `@interop/wallet-core` and `@interop/was-client`. This package calls them; it
+  `@interop/wallet-core` and `@interop/pws-client`. This package calls them; it
   does not re-derive a KDF, a cipher, or an envelope shape. Both are peer
   dependencies, so the host wallet's one copy serves this package too. A second
   copy could carry different collection names or KDF parameters than the wallet
   it migrates into, and nothing would fail.
 - The encrypted-collections profile (the `CollectionEncryption` descriptor, the
   epoch roster, the envelope) belongs to the encrypted-collections spec and its
-  reference implementation in `@interop/was-client`. This package is a listed
+  reference implementation in `@interop/pws-client`. This package is a listed
   party to that contract, as a consumer: `migrate/descriptorLog.ts` reads a
   descriptor out of an archived resource log, `migrate/generations.ts` unwraps
   its epoch secrets and opens Resources through `createEdvDocCipher`, and
@@ -299,7 +299,7 @@ The dependency direction inside this package is one way: `migrate/` reads
   migrate, and a `stoppedAt` where a quota refusal ended it. The host builds its
   own activity row from it; the migration writes none. Avoid: summary, result,
   stats.
-- **Resource** -- the WAS spec's unit of storage in a collection, and the unit
+- **Resource** -- the PWS spec's unit of storage in a collection, and the unit
   of a migration: the migration reads one archived Resource, opens it, hands it
   to a sink in one call, and the report counts it under one outcome. A chunked
   Resource is one Resource however many chunk files the archive holds for it.

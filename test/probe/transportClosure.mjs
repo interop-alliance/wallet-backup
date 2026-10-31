@@ -3,22 +3,23 @@
  */
 /**
  * The package evaluates no transport module. Everything it takes from
- * `@interop/wallet-core` and `@interop/was-client` is offline work -- a KDF, a
+ * `@interop/wallet-core` and `@interop/pws-client` is offline work -- a KDF, a
  * record cipher, a client derivation, a user key unwrap, a doc cipher -- and
  * each is imported from the leaf entry that carries it without the transport
  * graph beside it. This script imports the built package entry under a Node
  * resolve hook, records every module Node actually resolves, and fails when
- * one of them is a was-client module that talks to a server, was-client's
- * `./edv` or root barrel, edv-client's root barrel or its HTTPS transport, or
- * a wallet-core module past the offline leaves. It runs against `dist/`, as
- * part of `pnpm run test:dist`, so it also sees what a dependency package
- * loads on its own.
+ * one of them is a pws-client module that talks to a server, pws-client's
+ * `./edv` or root barrel, edv-client's root barrel or its HTTPS transport, a
+ * wallet-core module past the offline leaves, or any module of the former
+ * `@interop/was-client`. It runs against `dist/`, as part of
+ * `pnpm run test:dist`, so it also sees what a dependency package loads on its
+ * own.
  *
  * Known allowance: the standing client and recovery client derivations load
- * `@interop/was-client/identity`, which brings `@interop/ezcap`,
+ * `@interop/pws-client/identity`, which brings `@interop/ezcap`,
  * `@interop/capability-agent` and the HTTP signing packages behind them. That
  * is wallet-core's own recorded allowance for its leaves, so the HTTP packages
- * are not in the forbidden set here; the was-client request path is.
+ * are not in the forbidden set here; the pws-client request path is.
  *
  * The forbidden set matches on upstream `dist/` paths, so a change in that
  * layout would leave it matching nothing and the probe passing vacuously. A
@@ -28,15 +29,16 @@
 import { registerHooks } from 'node:module'
 
 const FORBIDDEN_MODULES = [
-  '/was-client/dist/index.js',
-  '/was-client/dist/WasClient.js',
-  '/was-client/dist/Space.js',
-  '/was-client/dist/Collection.js',
-  '/was-client/dist/Resource.js',
-  '/was-client/dist/internal/request.js',
-  '/was-client/dist/edv/index.js',
-  '/was-client/dist/edv/WasTransport.js',
-  '/was-client/dist/edv/transportFactory.js',
+  '/was-client/',
+  '/pws-client/dist/index.js',
+  '/pws-client/dist/PwsClient.js',
+  '/pws-client/dist/Space.js',
+  '/pws-client/dist/Collection.js',
+  '/pws-client/dist/Resource.js',
+  '/pws-client/dist/internal/request.js',
+  '/pws-client/dist/edv/index.js',
+  '/pws-client/dist/edv/PwsTransport.js',
+  '/pws-client/dist/edv/transportFactory.js',
   '/edv-client/dist/index.js',
   '/edv-client/dist/HttpsTransport.js',
   '/wallet-core/dist/index.js',
@@ -52,7 +54,7 @@ const EXPECTED_MODULES = [
   '/wallet-core/dist/unlock/standingClient.js',
   '/wallet-core/dist/keys/userKeyGenerations.js',
   '/wallet-core/dist/recovery/recoveryCode.js',
-  '/was-client/dist/edv/docCipher.js'
+  '/pws-client/dist/edv/docCipher.js'
 ]
 
 const resolved = new Set()

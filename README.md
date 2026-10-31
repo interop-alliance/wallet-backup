@@ -42,10 +42,10 @@ TBD
 To install via PNPM:
 
 ```
-pnpm install @interop/wallet-backup @interop/wallet-core @interop/was-client
+pnpm install @interop/wallet-backup @interop/wallet-core @interop/pws-client
 ```
 
-`@interop/wallet-core` and `@interop/was-client` are peer dependencies. The host
+`@interop/wallet-core` and `@interop/pws-client` are peer dependencies. The host
 wallet already depends on both, and this package uses the host's copy, so the
 bundle codec and the migration share the wallet's own constants, KDF parameters
 and ciphers.

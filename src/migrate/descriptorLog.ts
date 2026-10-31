@@ -17,8 +17,8 @@
  * server-attested bundle first; that is a later build.
  */
 import { parseResourceLog } from '@interop/vh-resource-log'
-import { EPOCH_CONFIGURATION_STATE_TYPE } from '@interop/was-client/edv/core'
-import type { CollectionEncryption } from '@interop/was-client'
+import { EPOCH_CONFIGURATION_STATE_TYPE } from '@interop/pws-client/edv/core'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { CollectionLogUnreadableError } from '../errors.js'
 
 /**
